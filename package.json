@@ -1,0 +1,68 @@
+{
+  "name": "codetutor-next",
+  "version": "0.9.0",
+  "description": "S32DS C 프로젝트를 근거 중심으로 공부하는 독립 Windows 데스크톱 앱",
+  "private": true,
+  "author": "김영민 <bigbangten95@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bigbangten/auto-codetutor.git"
+  },
+  "homepage": "https://github.com/bigbangten/auto-codetutor#readme",
+  "bugs": "https://github.com/bigbangten/auto-codetutor/issues",
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "dist": "npm run verify && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "dompurify": "3.4.13",
+    "marked": "18.0.9",
+    "monaco-editor": "0.56.0",
+    "pdfjs-dist": "6.2.108",
+    "web-tree-sitter": "0.26.12"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "tsx": "4.20.6",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "dompurify": "$dompurify"
+  },
+  "build": {
+    "appId": "com.bigbangten.auto-codetutor",
+    "productName": "Auto CodeTutor",
+    "asar": true,
+    "directories": {
+    "output": "release-0.9.0"
+    },
+    "files": [
+      "dist/**",
+      "!dist/**/*.map",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "win": {
+      "icon": "assets/app-icon.png",
+      "target": "portable",
+      "artifactName": "Auto-CodeTutor-${version}-portable.${ext}"
+    }
+  }
+}

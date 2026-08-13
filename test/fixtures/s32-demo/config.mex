@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <instance name="Clock_Ip" type="Clock_Ip">
+    <setting name="Name" value="Clock_Ip_Configuration" />
+  </instance>
+</configuration>

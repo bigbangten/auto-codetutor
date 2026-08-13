@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>Auto CodeTutor</title>
+  <link rel="stylesheet" href="renderer.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand" aria-label="Auto CodeTutor">
+      <span class="brand-mark">AC</span>
+      <strong>Auto CodeTutor</strong>
+    </div>
+    <div id="project-summary" class="project-summary">프로젝트를 열어 시작하세요</div>
+    <button id="reference-button" class="ghost" disabled>레퍼런스 <span id="reference-count">0</span></button>
+    <button id="jobs-button" class="ghost" aria-expanded="false">작업 <span id="jobs-count">0</span></button>
+  </header>
+
+  <div id="jobs-popover" class="popover" hidden>
+    <div class="popover-title"><strong>AI 작업</strong><button id="jobs-close" class="icon">×</button></div>
+    <div id="jobs-list" class="stack-list"><p class="empty">실행 중인 작업이 없습니다.</p></div>
+  </div>
+
+  <div id="reference-popover" class="popover reference-popover" hidden>
+    <div class="popover-title"><strong>레퍼런스 문서</strong><button id="reference-close" class="icon">×</button></div>
+    <p id="reference-path" class="reference-path">지정된 폴더가 없습니다.</p>
+    <p id="reference-summary" class="muted-copy">데이터시트 PDF와 텍스트 문서를 페이지 단위로 검색합니다.</p>
+    <div id="reference-documents" class="reference-documents"></div>
+    <div class="popover-actions">
+      <button id="reference-pick" class="primary">폴더 지정</button>
+      <button id="reference-clear" class="ghost" disabled>연결 해제</button>
+    </div>
+  </div>
+
+  <main id="workspace" style="--left-width:280px; --right-width:460px">
+    <aside id="left-pane" aria-label="프로젝트 탐색기">
+      <section class="project-switcher" aria-labelledby="project-switcher-title">
+        <header>
+          <span id="project-switcher-title" class="eyebrow">PROJECTS</span>
+          <button id="open-project" class="icon project-add" type="button" title="프로젝트 가져오기" aria-label="프로젝트 가져오기">＋</button>
+        </header>
+        <div id="project-list" class="project-list" role="listbox" aria-label="가져온 프로젝트">
+          <p class="project-list-empty">가져온 프로젝트가 없습니다.</p>
+        </div>
+      </section>
+      <div class="pane-heading">
+        <div><span class="eyebrow">EXPLORER</span><h1 id="project-name">프로젝트</h1></div>
+        <span id="index-state" class="status-pill">대기</span>
+      </div>
+      <label class="search-box"><span aria-hidden="true">⌕</span><input id="file-search" placeholder="파일 또는 심볼 검색" /></label>
+      <div class="left-switch" role="tablist">
+        <button class="active" data-left-view="files">파일</button>
+        <button data-left-view="symbols">심볼</button>
+      </div>
+      <div id="file-tree" class="tree" role="tree"></div>
+      <div id="symbol-list" class="tree" hidden></div>
+      <details class="limits">
+        <summary>분석 범위와 한계</summary>
+        <ul id="project-limitations"></ul>
+      </details>
+    </aside>
+
+    <div class="splitter" id="left-splitter" role="separator" aria-label="프로젝트 탐색기 너비 조절" tabindex="0"></div>
+
+    <section id="center-pane" aria-label="읽기 전용 코드">
+      <nav id="breadcrumbs" aria-label="현재 코드 위치"><span>프로젝트를 열어 주세요</span></nav>
+      <div id="editor-toolbar">
+        <span id="current-file">선택한 파일 없음</span>
+        <span class="readonly-badge" title="함수·변수·타입 위에서 Ctrl+클릭하거나 F12를 누르면 정의로 이동합니다.">읽기 전용</span>
+        <span id="selection-summary"></span>
+        <button id="ask-project" class="ghost" disabled>프로젝트 질문</button>
+        <button id="ask-selection" class="ghost" disabled>선택 영역 질문</button>
+        <button id="explain-selection" class="ghost" disabled>프로젝트 해설</button>
+        <button id="generate-comments" class="ghost" disabled>AI 주석</button>
+      </div>
+      <div id="editor" aria-label="C 코드 편집기"></div>
+      <div id="welcome" class="welcome">
+        <div class="welcome-content">
+          <p class="welcome-kicker">AUTO CODETUTOR</p>
+          <h2>임베디드 C 프로젝트 학습</h2>
+          <p>프로젝트의 구조, 실행 흐름, 심볼 참조를 읽기 전용으로 탐색합니다.</p>
+          <div class="welcome-start">
+            <h3>시작</h3>
+            <button id="welcome-open" class="welcome-link">프로젝트 폴더 열기...</button>
+          </div>
+          <div class="welcome-guide">
+            <span><kbd>1</kbd> 프로젝트 열기</span>
+            <span><kbd>2</kbd> 코드의 함수·변수 선택</span>
+            <span><kbd>3</kbd> 실행 개요에서 현재 위치 확인</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="splitter" id="right-splitter" role="separator" aria-label="학습 패널 너비 조절" tabindex="0"></div>
+
+    <aside id="right-pane" aria-label="학습 패널">
+      <nav id="right-tabs" role="tablist">
+        <button class="active" data-tab="symbol">심볼</button>
+        <button data-tab="flow">실행 개요</button>
+        <button data-tab="explain">코드 해설</button>
+        <button data-tab="chat">AI 질문</button>
+        <button data-tab="notes">노트</button>
+      </nav>
+
+      <div class="ai-controls global-ai-controls" aria-label="공통 AI 설정">
+        <select id="ai-engine" aria-label="AI 엔진"><option value="codex">Codex</option><option value="claude">Claude</option></select>
+        <label class="model-combobox" title="설치된 CLI에서 확인된 모델을 선택합니다.">
+          <span>모델</span>
+          <select id="ai-model" aria-label="AI 모델"><option value="default">CLI 기본 모델</option></select>
+        </label>
+        <select id="ai-effort" aria-label="추론 강도"><option>low</option><option selected>medium</option><option>high</option><option>xhigh</option><option>max</option></select>
+        <label id="fast-label" class="check compact"><input id="ai-fast" type="checkbox" />FAST</label>
+        <label class="check compact auto-analysis" title="src에서 인덱싱된 함수·변수·매개변수·타입·필드·매크로를 전용 경량 설정으로 모두 미리 분석합니다. 꺼도 개별 심볼의 분석 실행은 사용할 수 있습니다."><input id="auto-symbol-analysis" type="checkbox" checked />사전 분석</label>
+      </div>
+      <div id="semantic-progress" class="semantic-progress" hidden></div>
+
+      <section id="tab-symbol" class="tab-panel active">
+        <div id="symbol-empty" class="empty-state"><span>{ }</span><h2>심볼을 선택하세요</h2><p>함수, 변수 또는 타입을 클릭하면 정의와 참조를 표시합니다.</p></div>
+        <div id="symbol-content" hidden></div>
+      </section>
+
+      <section id="tab-flow" class="tab-panel">
+        <div class="panel-toolbar flow-toolbar">
+          <select id="flow-root" aria-label="실행 시작점"><option value="">프로그램 전체</option></select>
+          <button id="flow-locate" class="ghost" disabled>현재 코드 위치</button>
+          <button id="flow-reset" class="ghost">전체 개요</button>
+        </div>
+        <div id="flow-location" class="flow-location">
+          <span class="flow-location-icon">◎</span>
+          <div><small>현재 코드 위치</small><strong>코드에서 함수나 변수를 선택하세요</strong></div>
+        </div>
+        <div id="flow-canvas" class="flow-canvas"><p class="empty">프로젝트를 열면 단계별 실행 개요를 표시합니다.</p></div>
+        <details class="flow-limitations"><summary>정적 분석 범위</summary><div id="flow-caveat" class="caveat"></div></details>
+      </section>
+
+      <section id="tab-explain" class="tab-panel">
+        <div class="panel-action">
+          <div class="explain-scope-control">
+            <label for="explain-scope">해설 범위</label>
+            <select id="explain-scope"><option value="project">프로젝트 전체</option><option value="symbol" disabled>현재 심볼</option><option value="selection" disabled>선택 영역</option></select>
+            <strong id="explain-target">프로젝트 전체 구조와 실행 방식</strong>
+          </div>
+          <button id="generate-explanation" class="primary" disabled>해설 생성</button>
+        </div>
+        <div id="explain-status" class="result-status"></div>
+        <div id="explain-evidence" class="evidence-summary" hidden></div>
+        <article id="explain-output" class="markdown-output"><div class="empty-state small"><p>해설 문장의 코드 근거를 누르면 해당 줄로 이동하고 강조합니다.</p></div></article>
+      </section>
+
+      <section id="tab-chat" class="tab-panel chat-panel">
+        <div class="panel-toolbar">
+          <button id="new-chat" class="ghost">+ 새 질문</button>
+          <select id="chat-history" aria-label="채팅 기록"><option value="">대화 기록</option></select>
+          <span id="chat-stale" class="stale-badge" hidden>코드 변경됨</span>
+        </div>
+        <div class="chat-context-row">
+          <button id="chat-context" class="context-chip" disabled><span>질문 범위</span><strong>프로젝트 전체</strong></button>
+          <button id="clear-chat-context" class="icon" title="프로젝트 전체 질문으로 전환" hidden>×</button>
+        </div>
+        <div id="chat-status" class="chat-status" hidden aria-live="polite"></div>
+        <div id="chat-thread" class="chat-thread"><div class="empty-state small"><p>기본 질문 범위는 프로젝트 전체입니다.<br />특정 코드는 드래그한 뒤 우클릭하여 질문에 첨부할 수 있습니다.</p></div></div>
+        <div class="chat-compose">
+          <textarea id="chat-input" rows="3" placeholder="프로젝트의 전체 동작이나 특정 코드가 궁금한 점을 입력하세요"></textarea>
+          <button id="send-chat" class="primary">전송</button>
+        </div>
+      </section>
+
+      <section id="tab-notes" class="tab-panel">
+        <div class="panel-toolbar">
+          <button id="new-note" class="ghost">+ 새 노트</button>
+          <button id="export-notes" class="ghost">Markdown 내보내기</button>
+          <button id="create-quiz" class="primary" disabled>이해도 체크 3문항</button>
+        </div>
+        <div class="notes-layout">
+          <div id="notes-list" class="note-list"></div>
+          <div class="note-editor">
+            <input id="note-title" placeholder="노트 제목" />
+            <textarea id="note-body" placeholder="내 말로 다시 설명해 보세요"></textarea>
+            <label class="check"><input id="note-review" type="checkbox" />복습 필요</label>
+            <button id="save-note" class="primary">노트 저장</button>
+          </div>
+        </div>
+        <div class="section-divider"><span>이해도 체크</span></div>
+        <div id="quiz-list"><p class="empty">함수를 선택하고 이해도 체크를 만들어 보세요.</p></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="statusbar">
+    <span id="status-message">준비됨</span>
+    <span id="cursor-position">Ln 1, Col 1</span>
+  </footer>
+  <div id="editor-context-menu" class="editor-context-menu" role="menu" hidden>
+    <button id="context-ask-selection" role="menuitem">선택 영역을 AI에 질문</button>
+    <button id="context-explain-selection" role="menuitem">선택 영역 해설 생성</button>
+    <button id="context-comment-selection" role="menuitem">선택 영역에 AI 주석 생성</button>
+    <span class="menu-separator"></span>
+    <button id="context-ask-project" role="menuitem">프로젝트 전체에 질문</button>
+    <button id="context-flow" role="menuitem">현재 코드의 실행 위치 보기</button>
+  </div>
+
+  <dialog id="comment-dialog" class="comment-dialog">
+    <form method="dialog" class="dialog-shell">
+      <header><div><small>AI COMMENT ASSISTANT</small><h2>학습용 주석 생성</h2></div><button id="comment-close" class="icon" value="cancel" aria-label="닫기">×</button></header>
+      <div class="comment-options">
+        <label><span>적용 범위</span><select id="comment-target"><option value="selection">선택 영역</option><option value="symbol">현재 심볼</option><option value="file">현재 파일</option></select></label>
+        <label><span>주석 작업</span><select id="comment-mode"><option value="preserve">기존 유지 + 새 주석 추가</option><option value="replace">기존 제거 + 새 주석 작성</option><option value="custom">내 요청대로 작성</option><option value="remove">모든 주석만 제거</option></select></label>
+        <label><span>주석 언어</span><select id="comment-language"><option value="ko">한국어</option><option value="en">English</option></select></label>
+      </div>
+      <div id="comment-ai-options" class="comment-ai-options" aria-label="주석 생성 AI 설정">
+        <label><span>AI 엔진</span><select id="comment-ai-engine"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
+        <label class="comment-model"><span>주석 모델</span><select id="comment-ai-model"><option value="gpt-5.6-sol">GPT-5.6-Sol</option></select></label>
+        <label><span>추론 강도</span><select id="comment-ai-effort"><option>low</option><option selected>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+        <label id="comment-ai-fast-label" class="check comment-fast"><input id="comment-ai-fast" type="checkbox" />FAST</label>
+        <p id="comment-ai-note">주석 생성 전용 설정 · 기본 Codex GPT-5.6-Sol · medium</p>
+      </div>
+      <label id="comment-instruction-row" class="comment-request" hidden><span>추가 요청</span><textarea id="comment-instruction" rows="2" placeholder="예: 영어로 아주 짧게, 함수 목적만 러프하게 설명해줘"></textarea></label>
+      <p id="comment-target-label" class="dialog-hint">코드 범위를 선택하세요.</p>
+      <div id="comment-status" class="result-status"></div>
+      <textarea id="comment-preview" spellcheck="false" readonly placeholder="생성 결과를 검토한 뒤 코드에 적용할 수 있습니다."></textarea>
+      <footer>
+        <span class="dialog-safety">코드 토큰 변경이 감지되면 적용이 자동 차단됩니다.</span>
+        <button id="comment-cancel" class="ghost" value="cancel">취소</button>
+        <button id="comment-create" class="primary" type="button">주석 생성</button>
+        <button id="comment-apply" class="primary" type="button" disabled>코드에 적용</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="analysis-change-dialog" class="analysis-change-dialog">
+    <div class="analysis-change-shell">
+      <header>
+        <span class="analysis-change-icon">↻</span>
+        <div><small>ANALYSIS CACHE</small><h2>프로젝트 코드가 변경되었습니다</h2></div>
+      </header>
+      <p id="analysis-change-summary">저장된 심볼 설명과 현재 코드가 다릅니다.</p>
+      <p id="analysis-change-detail" class="analysis-change-detail"></p>
+      <div class="analysis-choice-list">
+        <button id="analysis-keep" class="analysis-choice" type="button">
+          <strong>기존 분석 유지</strong>
+          <span>빠르게 열고 이전 코드 기준 설명을 계속 표시합니다. 오래된 설명에는 경고가 붙습니다.</span>
+        </button>
+        <button id="analysis-update" class="analysis-choice recommended" type="button">
+          <strong>변경분 재분석</strong>
+          <span>일치하는 캐시는 재사용하고 바뀌거나 새로 생긴 심볼만 다시 분석합니다.</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+  <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>
