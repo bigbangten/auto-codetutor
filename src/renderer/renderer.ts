@@ -282,13 +282,16 @@ interface OriginPresentation {
 function originPresentation(symbol: SymbolRecord): OriginPresentation {
   const primaryFile = (symbol.definition ?? symbol.declaration).file.replaceAll('\\', '/');
   if (symbol.synthetic) {
+    const standardLibrary = symbol.origin.label === 'C 표준 라이브러리';
     return {
-      label: '외부 코드 · 정의 미포함',
-      detail: symbol.synthetic === 'external-type'
+      label: standardLibrary ? 'C 표준 라이브러리' : '외부 코드 · 정의 미포함',
+      detail: standardLibrary
+        ? 'C 표준에서 정한 함수 시그니처와 현재 프로젝트의 실제 호출 위치를 함께 표시합니다.'
+        : symbol.synthetic === 'external-type'
         ? '이 타입은 현재 연 프로젝트 안에서 정의를 찾지 못했습니다. SDK 또는 컴파일러 헤더에 있을 가능성이 큽니다.'
         : '이 함수·변수·매크로는 현재 연 프로젝트 안에서 선언이나 정의를 찾지 못했습니다.',
       className: 'external',
-      confidence: '프로젝트 외부',
+      confidence: standardLibrary ? '표준 시그니처' : '프로젝트 외부',
     };
   }
   if (symbol.origin.kind === 'mex') return {
@@ -358,7 +361,19 @@ async function renderSymbolInsight(insight: SymbolInsight): Promise<void> {
   status.textContent = insight.stale
     ? `이전 코드 기준 역할 분석 · ${insight.model} · 변경 후 코드와 다를 수 있습니다.`
     : `역할·값·수정 영향 분석 완료 · ${insight.model}`;
-  await renderGroundedMarkdown(output, insight.markdown, await window.codeTutor.validateAnchors(insight.markdown), (range) => void navigate(range), (document) => void openReferenceAnchor(document));
+  const markdown = withoutStructuredFunctionContract(insight.markdown);
+  await renderGroundedMarkdown(output, markdown, await window.codeTutor.validateAnchors(markdown), (range) => void navigate(range), (document) => void openReferenceAnchor(document));
+}
+
+function withoutStructuredFunctionContract(markdown: string): string {
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of markdown.split(/\r?\n/)) {
+    if (/^###\s+입력과\s*반환\s*$/.test(line.trim())) { skipping = true; continue; }
+    if (skipping && /^###\s+/.test(line.trim())) skipping = false;
+    if (!skipping) kept.push(line);
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 async function loadSymbolInsight(symbol: SymbolRecord, rerender = false): Promise<SymbolInsight | null> {
@@ -470,8 +485,8 @@ function appendFunctionContract(parent: HTMLElement, symbol: SymbolRecord): void
   const insight = state.symbolInsights.get(symbol.id);
   const list = document.createElement('div'); list.className = 'function-contract';
 
-  const parameterGroup = document.createElement('div'); parameterGroup.className = 'contract-group';
-  const parameterHeading = document.createElement('strong'); parameterHeading.textContent = '매개변수'; parameterGroup.append(parameterHeading);
+  const parameterGroup = document.createElement('div'); parameterGroup.className = 'contract-group input-contract';
+  const parameterHeading = document.createElement('strong'); parameterHeading.textContent = '입력 (Parameters)'; parameterGroup.append(parameterHeading);
   if (symbol.parameters.length) {
     for (const parameter of symbol.parameters) {
       const row = document.createElement('div'); row.className = 'contract-row';
@@ -483,17 +498,36 @@ function appendFunctionContract(parent: HTMLElement, symbol: SymbolRecord): void
       jump.addEventListener('click', () => void navigate(parameter.range));
       row.append(signature, jump, description); parameterGroup.append(row);
     }
+  } else if (symbol.synthetic === 'external-symbol') {
+    const observedCalls = symbol.callers.filter((call) => call.arguments?.length);
+    const maximum = observedCalls.reduce((count, call) => Math.max(count, call.arguments?.length ?? 0), 0);
+    if (maximum) {
+      const note = document.createElement('p'); note.className = 'contract-source-note';
+      note.textContent = `선언은 프로젝트 밖에 있지만 실제 호출부에서 ${maximum}개 인자를 확인했습니다.`;
+      parameterGroup.append(note);
+      for (let index = 0; index < maximum; index += 1) {
+        const samples = [...new Set(observedCalls.map((call) => call.arguments?.[index]).filter((value): value is string => Boolean(value)))].slice(0, 4);
+        const row = document.createElement('div'); row.className = 'contract-row observed-parameter';
+        const signature = document.createElement('code'); signature.textContent = `인자 ${index + 1} · ${samples.join(' / ') || '값 미확인'}`;
+        const description = document.createElement('p');
+        description.textContent = insight?.parameterDescriptions?.[`arg${index + 1}`]
+          ?? describeObservedArgument(samples[0] ?? '', index + 1);
+        row.append(signature, description); parameterGroup.append(row);
+      }
+    } else {
+      const empty = document.createElement('p'); empty.className = 'contract-empty';
+      empty.textContent = '프로젝트 내부 선언과 인자가 있는 호출부를 찾지 못해 매개변수 형식을 확인할 수 없습니다.';
+      parameterGroup.append(empty);
+    }
   } else {
     const empty = document.createElement('p'); empty.className = 'contract-empty';
-    empty.textContent = symbol.synthetic === 'external-symbol'
-      ? '프로젝트 내부 선언을 찾지 못해 매개변수 형식을 확정할 수 없습니다.'
-      : '입력 매개변수가 없습니다.';
+    empty.textContent = '입력 매개변수가 없습니다.';
     parameterGroup.append(empty);
   }
   list.append(parameterGroup);
 
-  const returnGroup = document.createElement('div'); returnGroup.className = 'contract-group';
-  const returnHeading = document.createElement('strong'); returnHeading.textContent = '반환값'; returnGroup.append(returnHeading);
+  const returnGroup = document.createElement('div'); returnGroup.className = 'contract-group return-contract';
+  const returnHeading = document.createElement('strong'); returnHeading.textContent = '반환 (Return)'; returnGroup.append(returnHeading);
   const returnRow = document.createElement('div'); returnRow.className = 'contract-row return-row';
   const returnType = document.createElement('code'); returnType.textContent = symbol.type;
   const returnDescription = document.createElement('p');
@@ -523,19 +557,47 @@ function appendFunctionContract(parent: HTMLElement, symbol: SymbolRecord): void
   area.append(list); parent.append(area);
 }
 
+function describeObservedArgument(value: string, position: number): string {
+  if (!value) return `호출부에서 ${position}번째로 전달되는 값입니다. 정확한 타입은 SDK 선언을 확인해야 합니다.`;
+  const address = value.match(/^&\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)$/)?.[1];
+  if (address) return `${address}의 주소를 전달합니다. 함수가 이 객체를 읽거나 수정할 수 있으므로 호출 뒤 값 변화를 함께 확인해야 합니다.`;
+  if (/^(?:NULL|nullptr)$/i.test(value)) return '널 포인터를 전달합니다. 이 인자를 선택 사항으로 허용하는지는 실제 SDK 선언을 확인해야 합니다.';
+  if (/^sizeof\s*\(/.test(value)) return `${value}로 계산한 바이트 크기를 전달합니다.`;
+  if (/^(?:[-+]?\d|0x|true$|false$|'.*'$|".*"$)/i.test(value)) return `고정 값 ${value}을(를) 전달합니다.`;
+  return `${value}의 현재 값을 ${position}번째 인자로 전달합니다. 정확한 매개변수 타입은 외부 선언에서 확인해야 합니다.`;
+}
+
 function appendCallList(parent: HTMLElement, title: string, calls: SymbolRecord['calls'] | SymbolRecord['callers']): void {
-  const area = section(title);
-  if (!calls.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '확인된 항목 없음'; area.append(empty); }
-  calls.slice(0, 80).forEach((call) => {
+  const unique = [...new Map(calls.map((call) => [`${call.range.file}:${call.range.startLine}:${call.range.startColumn}:${call.name}:${call.arguments?.join(',') ?? ''}`, call] as const)).values()]
+    .sort((left, right) => callPathPriority(left.range.file) - callPathPriority(right.range.file)
+      || left.range.file.localeCompare(right.range.file)
+      || left.range.startLine - right.range.startLine);
+  const area = section(`${title} · ${unique.length}`);
+  if (!unique.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '확인된 항목 없음'; area.append(empty); }
+  const appendCall = (call: (typeof unique)[number], host: HTMLElement): void => {
     const button = sourceLink(
       call.range,
       call.name,
       `${call.range.file}:${call.range.startLine}${call.resolved ? '' : ' · 정의 미해결'}`,
       call.arguments?.length ? `전달 인자: ${call.arguments.join(', ')}` : undefined,
     ); button.className = 'call-link';
-    button.addEventListener('dblclick', () => { if (call.symbolId) void selectSymbol(call.symbolId, true); }); area.append(button);
-  });
+    button.addEventListener('dblclick', () => { if (call.symbolId) void selectSymbol(call.symbolId, true); }); host.append(button);
+  };
+  unique.slice(0, 14).forEach((call) => appendCall(call, area));
+  if (unique.length > 14) {
+    const more = document.createElement('details'); more.className = 'compact-more call-list-more';
+    const summary = document.createElement('summary'); summary.textContent = `추가 호출 ${unique.length - 14}개 보기`; more.append(summary);
+    unique.slice(14).forEach((call) => appendCall(call, more)); area.append(more);
+  }
   parent.append(area);
+}
+
+function callPathPriority(file: string): number {
+  const normalized = file.replaceAll('\\', '/');
+  if (/^src\//i.test(normalized)) return 0;
+  if (/(?:^|\/)(?:app|application|source)(?:\/|$)/i.test(normalized)) return 1;
+  if (/(?:^|\/)(?:SDK|RTD|middleware|generate|generated)(?:\/|$)/i.test(normalized)) return 3;
+  return 2;
 }
 
 function appendReferences(parent: HTMLElement, title: string, references: SymbolRecord['references'], emphasis = false): void {
@@ -548,7 +610,7 @@ function appendReferences(parent: HTMLElement, title: string, references: Symbol
   references.slice(0, 100).forEach((reference) => {
     const link = sourceLink(
       reference.range,
-      `${referenceLabels[reference.kind]}${reference.container ? ` · ${reference.container}` : ''}`,
+      `${referenceLabels[reference.kind]}${reference.container ? ` · ${reference.container}` : ''}${reference.target ? ` · ${reference.target}` : ''}`,
       undefined,
       reference.changeDescription ?? reference.expression,
     );
@@ -720,7 +782,8 @@ async function inspectAt(line: number, column: number): Promise<void> {
   const isLanguageSyntax = isCReservedWord(selected.token)
     || !identifier
     || explanation?.category === 'C 문법'
-    || explanation?.category === '전처리 지시문';
+    || explanation?.category === '전처리 지시문'
+    || explanation?.category === '포함 헤더';
   if (explanation && isLanguageSyntax) {
     renderCTokenExplanation(explanation, line);
     return;

@@ -60,4 +60,5 @@ test('배치 심볼 JSON의 필드 의미와 코드 근거를 캐시 형식으�
   assert.equal(insight?.fieldDescriptions.data_length, '유효 페이로드 바이트 수');
   assert.equal(insight?.typeDescription, '프레임 데이터 구조체다.');
   assert.match(insight?.markdown ?? '', /\[\[src\/app\.c:12\]\]/);
+  assert.doesNotMatch(insight?.markdown ?? '', /입력과 반환/, '입력/반환은 구조화 UI에서 한 번만 표시해야 함');
 });

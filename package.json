@@ -1,6 +1,6 @@
 {
   "name": "codetutor-next",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "S32DS C 프로젝트를 근거 중심으로 공부하는 독립 Windows 데스크톱 앱",
   "private": true,
   "author": "김영민 <bigbangten95@gmail.com>",
@@ -46,7 +46,7 @@
     "productName": "Auto CodeTutor",
     "asar": true,
     "directories": {
-    "output": "release-0.9.0"
+      "output": "release-0.9.1"
     },
     "files": [
       "dist/**",

@@ -38,6 +38,9 @@ test('C index resolves functions, callers, variables, typedef and union fields',
   const localPayload = index.symbols.find((symbol) => symbol.name === 'p' && symbol.kind === 'variable');
   assert.equal(localPayload?.resolvedType?.name, 'Payload_t');
   assert.deepEqual(localPayload?.resolvedType?.fields.map((field) => field.name), ['raw', 'words']);
+  assert.ok(localPayload?.references.some((reference) => reference.kind === 'write'
+    && reference.target === 'p.raw'
+    && reference.changeDescription?.includes('p.raw')));
 
   const graph = index.graph({ rootId: main.id });
   assert.ok(graph.nodes.some((node) => node.name === 'main'));
@@ -102,7 +105,9 @@ test('every src token can resolve external types/functions and function contract
   const sdkCall = index.getSymbolAt('src/contracts.c', 4, 14, 'SDK_Send');
   assert.equal(sdkCall?.synthetic, 'external-symbol');
   assert.equal(sdkCall?.kind, 'function');
+  assert.equal(sdkCall?.type, 'status_t', '호출 결과가 그대로 반환되면 외부 함수 반환형을 호출 함수에서 추론해야 함');
   assert.deepEqual(fn?.calls.find((call) => call.name === 'SDK_Send')?.arguments, ['port', 'label']);
+  assert.deepEqual(sdkCall?.callers[0]?.arguments, ['port', 'label']);
   assert.equal(index.getSymbolAt('src/contracts.c', 2, 13, 'RETRY_LIMIT')?.kind, 'macro');
 });
 
@@ -128,9 +133,12 @@ test('member fields are recovered from use sites when an SDK type definition is 
   const parsed = await parser.parse(file, `
     void Configure(void) {
       SWITCH_SJA11XX_Control_t control;
+      status_t status;
       control.valid = true;
       control.rdwrset = false;
       control.index = 2U;
+      memset(&control, 0, sizeof(control));
+      status = SWITCH_SJA1110_setControl(&control, swt);
     }
   `, mex);
   const index = new ProjectIndex(path.resolve('.'), [parsed]);
@@ -139,4 +147,15 @@ test('member fields are recovered from use sites when an SDK type definition is 
   assert.equal(control?.resolvedType?.inferred, true);
   assert.deepEqual(control?.resolvedType?.fields.map((field) => field.name), ['valid', 'rdwrset', 'index']);
   assert.ok(control?.resolvedType?.fields.every((field) => field.inferred));
+  assert.ok(control?.references.some((reference) => reference.target === 'control.valid'
+    && reference.changeDescription?.includes('고정 값 true')));
+
+  const memset = index.symbols.find((symbol) => symbol.name === 'memset' && symbol.kind === 'function');
+  assert.equal(memset?.type, 'void *');
+  assert.equal(memset?.origin.label, 'C 표준 라이브러리');
+  assert.deepEqual(memset?.parameters.map((parameter) => parameter.name), ['destination', 'value', 'count']);
+
+  const setControl = index.symbols.find((symbol) => symbol.name === 'SWITCH_SJA1110_setControl' && symbol.kind === 'function');
+  assert.equal(setControl?.type, 'status_t');
+  assert.deepEqual(setControl?.callers[0]?.arguments, ['&control', 'swt']);
 });

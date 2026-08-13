@@ -235,13 +235,16 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .type-explanation { margin-top: 10px; padding: 9px 10px; border-left: 2px solid #4ec9b0; background: #202827; }
 .type-explanation strong { display: block; margin-bottom: 4px; color: #9cdcfe; font-size: 10px; }
 .type-explanation p { margin: 0; color: #c9d5d2; font-size: 11px; line-height: 1.55; }
-.function-contract { display: grid; gap: 10px; }
-.contract-group { display: grid; gap: 4px; }
-.contract-group > strong { color: #9d9d9d; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+.function-contract { display: grid; gap: 12px; }
+.contract-group { display: grid; gap: 7px; padding: 11px; border: 1px solid #343434; border-radius: 3px; background: #202020; }
+.contract-group.input-contract { border-left: 3px solid #3794c6; background: #1d252a; }
+.contract-group.return-contract { border-left: 3px solid #c586c0; background: #272128; }
+.contract-group > strong { color: #c8c8c8; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
 .contract-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 8px; padding: 8px 9px; border-left: 2px solid #3d5968; background: #252526; }
 .contract-row > code { min-width: 0; overflow: hidden; color: #4ec9b0; text-overflow: ellipsis; white-space: nowrap; font: 11px "Cascadia Mono", Consolas, monospace; }
 .contract-row > p { grid-column: 1 / -1; margin: 0; color: #c4c4c4; font-size: 11px; line-height: 1.5; }
 .contract-empty { margin: 0; padding: 7px 9px; background: #252526; color: #858585; font-size: 11px; }
+.contract-source-note { margin: 0; padding: 7px 9px; border: 1px solid #31516a; background: #172733; color: #acd5ec; font-size: 11px; line-height: 1.5; }
 .return-row { border-left-color: #c586c0; }
 .return-expressions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 2px; }
 .return-expressions span { color: #858585; font-size: 9px; }
@@ -262,7 +265,10 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .source-link.write-reference:hover { background: #353126; }
 .source-link code, .call-link code { min-width: 0; overflow: hidden; color: #dcdcaa; text-overflow: ellipsis; white-space: nowrap; font: 12px "Cascadia Mono", Consolas, monospace; }
 .source-link small, .call-link small { color: #858585; font-size: 10px; }
-.source-link .change-detail { grid-column: 1 / -1; overflow: hidden; color: #c8b676; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.4 "Cascadia Mono", Consolas, monospace; }
+.source-link .change-detail, .call-link .change-detail { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: #c8b676; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.4 "Cascadia Mono", Consolas, monospace; }
+.call-link code, .call-link small { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-list-more { margin-top: 6px; border-top: 1px solid #3a3a3a; }
+.call-list-more > summary { padding: 9px 7px 5px; color: #9cdcfe; cursor: pointer; font-size: 11px; }
 .field-tree { display: grid; gap: 3px; margin: 0; padding: 0; color: #d4d4d4; list-style: none; }
 .field-tree li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 6px 7px; border-left: 2px solid #3c3c3c; background: #252526; }
 .field-tree li > .field-descriptor { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.4 "Cascadia Mono", Consolas, monospace; }
@@ -535,7 +541,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .type-explanation p { font-size: 13px; line-height: 1.55; }
 .contract-group > strong { color: #b5b5b5; font-size: 12px; }
 .contract-row > code { font-size: 12px; }
-.contract-row > p, .contract-empty { font-size: 13px; line-height: 1.55; }
+.contract-row > p, .contract-empty, .contract-source-note { font-size: 13px; line-height: 1.55; }
 .return-expressions span, .call-argument-examples summary { font-size: 12px; }
 .return-expressions code { font-size: 11px; }
 .origin-reason, .origin-summary strong { font-size: 13px; }
@@ -543,7 +549,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .source-link, .call-link { min-height: 38px; padding: 7px 9px; }
 .source-link code, .call-link code { font-size: 12px; }
 .source-link small, .call-link small { color: var(--muted); font-size: 12px; }
-.source-link .change-detail { font-size: 12px; line-height: 1.5; }
+.source-link .change-detail, .call-link .change-detail { font-size: 12px; line-height: 1.5; }
+.call-list-more > summary { font-size: 12px; }
 .field-tree li { padding: 8px 9px; }
 .field-tree li > .field-descriptor { font-size: 12px; }
 .field-tree .field-meaning { font-size: 13px; line-height: 1.55; }

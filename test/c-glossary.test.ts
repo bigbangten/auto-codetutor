@@ -21,5 +21,7 @@ test('a preprocessor directive is distinct from the macro or header that follows
   const header = describeCToken('stdint', '#include <stdint.h>', 12);
   assert.equal(directive?.category, '전처리 지시문');
   assert.equal(macro?.category, '프로젝트/외부 식별자');
-  assert.equal(header?.category, '프로젝트/외부 식별자');
+  assert.equal(header?.category, '포함 헤더');
+  assert.equal(header?.token, 'stdint.h');
+  assert.match(header?.summary ?? '', /선언된 함수, 타입/);
 });

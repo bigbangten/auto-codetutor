@@ -10,7 +10,7 @@ import { readJson, writeJsonAtomic } from './json-store.js';
 import { ReferenceService, type ReferenceHit } from './reference-service.js';
 
 interface IndexCache {
-  schema: 4;
+  schema: 5;
   mexKey: string;
   parsedFiles: ParsedFile[];
 }
@@ -232,9 +232,9 @@ export class ProjectService {
       const mexSources = await Promise.all(mexFiles.map(async (file) => ({ path: file.path, source: await this.readSource(file.path) })));
       const mexInventory = parseMexInventory(mexSources);
       const mexKey = hash(mexSources.map((item) => `${item.path}\0${item.source}`).join('\0'));
-      const cacheFile = path.join(this.dataDir, 'index-v4.json');
+      const cacheFile = path.join(this.dataDir, 'index-v5.json');
       const diskCache = force ? null : await readJson<IndexCache | null>(cacheFile, null);
-      const validCache = diskCache?.schema === 4 ? diskCache : null;
+      const validCache = diskCache?.schema === 5 ? diskCache : null;
       const cachedByPath = new Map((validCache?.parsedFiles ?? []).map((entry) => [entry.file.path, entry]));
       const mexUnchanged = validCache?.mexKey === mexKey;
       const aiMetadata = await readJson<{ files?: string[] }>(path.join(this.dataDir, 'ai-authorship.json'), {});
@@ -252,7 +252,7 @@ export class ProjectService {
       }
       this.files = files;
       this.index = new ProjectIndex(this.rootPath, parsedFiles);
-      await writeJsonAtomic(cacheFile, { schema: 4, mexKey, parsedFiles } satisfies IndexCache);
+      await writeJsonAtomic(cacheFile, { schema: 5, mexKey, parsedFiles } satisfies IndexCache);
       const snapshot = this.index.snapshot(files);
       return snapshot;
     } finally {

@@ -156,6 +156,28 @@ export function describeCToken(token: string, line = '', column = 1): CTokenExpl
   const rawToken = token.trim();
   const normalized = rawToken.replace(/^#/, '');
   const directive = line.match(/^\s*#\s*(include|define|ifdef|ifndef|if|elif|else|endif|pragma|undef|error)\b\s*(.*)$/);
+  const include = line.match(/^\s*#\s*include\s*([<"])([^>"]+)[>"]/);
+  if (include?.[2]) {
+    const header = include[2].trim();
+    const start = line.indexOf(include[2]);
+    const offset = Math.max(0, column - 1);
+    if (start >= 0 && offset >= start && offset < start + include[2].length) {
+      const local = include[1] === '"';
+      return {
+        token: header,
+        title: `${header} · 포함 헤더`,
+        category: '포함 헤더',
+        summary: `이 파일에서 ${header}에 선언된 함수, 타입, 상수와 매크로를 사용할 수 있게 합니다.`,
+        details: [
+          local
+            ? '큰따옴표 경로는 보통 현재 소스 주변과 프로젝트 include 경로를 먼저 검색합니다.'
+            : '꺾쇠 경로는 보통 컴파일러, 표준 라이브러리 또는 SDK include 경로에서 검색합니다.',
+          '헤더 이름은 문자열 데이터가 아닙니다. 빌드 설정의 include 경로와 결합되어 실제 선언 파일을 가리킵니다.',
+        ],
+        context: `현재 포함 경로: ${header}`,
+      };
+    }
+  }
   // A preprocessor line contains several different objects. Only the directive
   // keyword (or the leading #) is C syntax; the following identifier may be a
   // real macro symbol and must be offered to the project index first.

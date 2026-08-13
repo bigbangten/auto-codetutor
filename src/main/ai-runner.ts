@@ -91,9 +91,9 @@ function symbolContext(symbol: SymbolRecord): string {
     symbol.returnExpressions.length ? `반환식: ${symbol.returnExpressions.join(', ')}` : '',
     `정의: ${anchor(symbol.definition ?? symbol.declaration)}`,
     `출처: ${symbol.origin.label} (${symbol.origin.confidence}; ${symbol.origin.rule})`,
-    `호출자: ${symbol.callers.slice(0, 12).map((item) => `${item.name} ${anchor(item.range)}`).join(', ') || '없음/확인되지 않음'}`,
+    `호출자: ${symbol.callers.slice(0, 12).map((item) => `${item.name}(${item.arguments?.join(', ') ?? ''}) ${anchor(item.range)}`).join(', ') || '없음/확인되지 않음'}`,
     `호출 대상: ${symbol.calls.slice(0, 15).map((item) => `${item.name} ${anchor(item.range)}${item.resolved ? '' : ' (미해결)'}`).join(', ') || '없음'}`,
-    `주요 사용처: ${symbol.references.slice(0, 20).map((item) => `${item.kind} ${anchor(item.range)}${item.changeDescription ? ` (${item.changeDescription})` : ''}`).join(', ') || '없음'}`,
+    `주요 사용처: ${symbol.references.slice(0, 20).map((item) => `${item.kind}${item.target ? ` ${item.target}` : ''} ${anchor(item.range)}${item.changeDescription ? ` (${item.changeDescription})` : ''}`).join(', ') || '없음'}`,
     (symbol.fields.length || symbol.resolvedType?.fields.length) ? `내부 필드: ${(symbol.fields.length ? symbol.fields : symbol.resolvedType!.fields).map((field) => `${field.type} ${field.name} ${anchor(field.range)}`).join('; ')}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -202,14 +202,6 @@ export function parseSymbolInsightOutput(output: string, requested: SymbolRecord
       '',
       '### 데이터 타입',
       typeDescription,
-      ...(symbol.kind === 'function' ? [
-        '',
-        '### 입력과 반환',
-        symbol.parameters.length
-          ? symbol.parameters.map((parameter) => `- \`${parameter.type} ${parameter.name}\`: ${parameterDescriptions[parameter.name] ?? '호출부와 함수 본문을 함께 확인해야 합니다.'}`).join('\n')
-          : '- 입력 매개변수 없음',
-        `- 반환: ${returnDescription}`,
-      ] : []),
       '',
       '### 값을 바꾸면',
       impact,
@@ -286,6 +278,7 @@ focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘
 - meaning: 함수라면 입력-핵심처리-출력, 변수라면 실제로 담는 값과 단위를 1~3문장으로 설명합니다.
 - typeDescription: uint8_t 같은 기본 타입은 비트 폭·부호·범위를, status_t/err_t 같은 SDK 타입은 성공·오류 등 이 프로젝트에서의 의미를 설명합니다.
 - parameters: 함수의 모든 매개변수가 호출자에게서 무엇을 받고 함수 안에서 어떻게 쓰이는지 이름별로 설명합니다. 매개변수가 없으면 빈 배열입니다.
+- 프로젝트 내부 선언이 없지만 callSites에 인자가 있으면 무인자 함수라고 쓰지 마세요. 관찰된 순서대로 arg1, arg2 같은 이름을 사용해 각 전달값의 역할을 설명하고, 정확한 선언 타입은 미확인이라고 구분하세요.
 - returnDescription: 함수가 무엇을 반환하고 호출자가 그 값을 어떻게 해석하는지 설명합니다. void면 반환값이 없다고 명시합니다.
 - impact: 이 값을 수정하거나 동작을 바꾸면 어떤 판정·메시지·하드웨어 동작에 영향이 가는지 설명합니다.
 - caveat: 정적 분석으로 확인할 수 없는 런타임/하드웨어 조건만 짧게 씁니다.

@@ -26,6 +26,7 @@ interface RawOccurrence {
   range: SourceRange;
   isType?: boolean;
   container?: string;
+  target?: string;
   expression?: string;
   changeDescription?: string;
   valueSource?: ReferenceInfo['valueSource'];
@@ -36,6 +37,8 @@ interface RawCall {
   name: string;
   range: SourceRange;
   arguments: string[];
+  /** Variable receiving the return value, or $return when forwarded by return. */
+  resultTarget?: string;
 }
 
 interface RawMemberAccess {
@@ -146,23 +149,29 @@ function valueDescription(right: SyntaxNode, operator = '='): Pick<RawOccurrence
   return { changeDescription: `${value} 식의 계산 결과 대입`, valueSource: 'expression' };
 }
 
-function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'expression' | 'changeDescription' | 'valueSource'> {
+function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'target' | 'expression' | 'changeDescription' | 'valueSource'> {
   let current: SyntaxNode | null = node;
   for (let depth = 0; current?.parent && depth < 6; depth += 1) {
     const parent: SyntaxNode = current.parent;
     if (parent.type === 'update_expression') {
       const operator = parent.text.includes('++') ? '++' : '--';
-      return { kind: 'write', expression: concise(parent.text), ...valueDescription(parent, operator) };
+      const target = concise(parent.namedChildren[0]?.text ?? node.text);
+      const change = valueDescription(parent, operator);
+      return { kind: 'write', target, expression: concise(parent.text), ...change, changeDescription: `${target}: ${change.changeDescription}` };
     }
     if (parent.type === 'assignment_expression') {
       const left = parent.childForFieldName('left');
       const right = parent.childForFieldName('right');
       if (left && node.startIndex >= left.startIndex && node.endIndex <= left.endIndex) {
         const operator = right ? parent.text.slice(left.endIndex - parent.startIndex, right.startIndex - parent.startIndex).trim() || '=' : '=';
+        const target = concise(left.text);
+        const change = right ? valueDescription(right, operator) : { changeDescription: '값 변경', valueSource: 'expression' as const };
         return {
           kind: 'write',
+          target,
           expression: concise(parent.text),
-          ...(right ? valueDescription(right, operator) : { changeDescription: '값 변경', valueSource: 'expression' as const }),
+          ...change,
+          changeDescription: `${target}: ${change.changeDescription}`,
         };
       }
       return { kind: 'read' };
@@ -187,10 +196,36 @@ function initializerOccurrence(file: string, name: string, declarator: SyntaxNod
     kind: 'write',
     range: rangeOf(file, nameNode),
     container,
+    target: name,
     expression: concise(`${name} = ${value.text}`),
     ...description,
+    changeDescription: `${name}: ${description.changeDescription}`,
     valueSource: description.valueSource === 'expression' ? 'initializer' : description.valueSource,
   };
+}
+
+function callResultTarget(call: SyntaxNode): string | undefined {
+  let current: SyntaxNode | null = call;
+  for (let depth = 0; current?.parent && depth < 6; depth += 1) {
+    const parent: SyntaxNode = current.parent;
+    if (parent.type === 'assignment_expression') {
+      const right = parent.childForFieldName('right');
+      const left = parent.childForFieldName('left');
+      return right && left && call.startIndex >= right.startIndex && call.endIndex <= right.endIndex
+        ? concise(left.text)
+        : undefined;
+    }
+    if (parent.type === 'init_declarator') {
+      const value = parent.childForFieldName('value');
+      const declarator = parent.childForFieldName('declarator');
+      const name = declaratorIdentifier(declarator);
+      return value && name && call.startIndex >= value.startIndex && call.endIndex <= value.endIndex ? name.text : undefined;
+    }
+    if (parent.type === 'return_statement') return '$return';
+    if (['argument_list', 'expression_statement', 'compound_statement'].includes(parent.type)) return undefined;
+    current = parent;
+  }
+  return undefined;
 }
 
 function directDeclarators(declaration: SyntaxNode): SyntaxNode[] {
@@ -413,6 +448,7 @@ export class CParser {
           name: callee.text,
           range: rangeOf(file.path, callee),
           arguments: (argumentList?.namedChildren ?? []).map((argument) => concise(argument.text, 240)),
+          resultTarget: callResultTarget(call),
         });
       }
     }
@@ -533,6 +569,26 @@ const TYPE_QUALIFIERS = new Set([
   'const', 'volatile', 'static', 'extern', 'register', 'signed', 'unsigned', 'short', 'long',
   'struct', 'union', 'enum', 'anonymous',
 ]);
+
+interface KnownCFunction {
+  returnType: string;
+  signature: string;
+  parameters: Array<{ name: string; type: string }>;
+}
+
+const KNOWN_C_FUNCTIONS: Record<string, KnownCFunction> = {
+  memset: { returnType: 'void *', signature: 'void *memset(void *destination, int value, size_t count)', parameters: [{ name: 'destination', type: 'void *' }, { name: 'value', type: 'int' }, { name: 'count', type: 'size_t' }] },
+  memcpy: { returnType: 'void *', signature: 'void *memcpy(void *destination, const void *source, size_t count)', parameters: [{ name: 'destination', type: 'void *' }, { name: 'source', type: 'const void *' }, { name: 'count', type: 'size_t' }] },
+  memmove: { returnType: 'void *', signature: 'void *memmove(void *destination, const void *source, size_t count)', parameters: [{ name: 'destination', type: 'void *' }, { name: 'source', type: 'const void *' }, { name: 'count', type: 'size_t' }] },
+  memcmp: { returnType: 'int', signature: 'int memcmp(const void *left, const void *right, size_t count)', parameters: [{ name: 'left', type: 'const void *' }, { name: 'right', type: 'const void *' }, { name: 'count', type: 'size_t' }] },
+  strlen: { returnType: 'size_t', signature: 'size_t strlen(const char *text)', parameters: [{ name: 'text', type: 'const char *' }] },
+  strcmp: { returnType: 'int', signature: 'int strcmp(const char *left, const char *right)', parameters: [{ name: 'left', type: 'const char *' }, { name: 'right', type: 'const char *' }] },
+  strncmp: { returnType: 'int', signature: 'int strncmp(const char *left, const char *right, size_t count)', parameters: [{ name: 'left', type: 'const char *' }, { name: 'right', type: 'const char *' }, { name: 'count', type: 'size_t' }] },
+  malloc: { returnType: 'void *', signature: 'void *malloc(size_t size)', parameters: [{ name: 'size', type: 'size_t' }] },
+  calloc: { returnType: 'void *', signature: 'void *calloc(size_t count, size_t size)', parameters: [{ name: 'count', type: 'size_t' }, { name: 'size', type: 'size_t' }] },
+  realloc: { returnType: 'void *', signature: 'void *realloc(void *memory, size_t size)', parameters: [{ name: 'memory', type: 'void *' }, { name: 'size', type: 'size_t' }] },
+  free: { returnType: 'void', signature: 'void free(void *memory)', parameters: [{ name: 'memory', type: 'void *' }] },
+};
 
 function typeNames(type: string): string[] {
   return (type.match(/[A-Za-z_]\w*/g) ?? []).filter((name) => !TYPE_NOISE.has(name));
@@ -704,29 +760,63 @@ export class ProjectIndex {
     for (const entry of unresolved.values()) {
       const first = entry.occurrences[0];
       if (!first) continue;
+      const observedCalls = entry.kind === 'function'
+        ? parsedFiles.flatMap((file) => file.calls.filter((call) => call.name === first.name))
+        : [];
+      const knownFunction = entry.kind === 'function' ? KNOWN_C_FUNCTIONS[first.name] : undefined;
+      const inferredTypes = observedCalls.flatMap((call) => {
+        if (!call.resultTarget) return [];
+        if (call.resultTarget === '$return') {
+          const caller = this.byId.get(call.callerId);
+          return caller && !/확인 필요/.test(caller.type) ? [caller.type] : [];
+        }
+        const rootName = call.resultTarget.match(/[A-Za-z_]\w*/)?.[0];
+        if (!rootName) return [];
+        const caller = this.byId.get(call.callerId);
+        const candidate = chooseCandidate(
+          (this.byName.get(rootName) ?? []).filter((symbol) => ['variable', 'parameter', 'field'].includes(symbol.kind)),
+          { name: rootName, kind: 'write', range: call.range, container: caller?.name },
+        );
+        return candidate && !/확인 필요/.test(candidate.type) ? [candidate.type] : [];
+      });
+      const inferredType = inferredTypes.sort((left, right) =>
+        inferredTypes.filter((value) => value === right).length - inferredTypes.filter((value) => value === left).length,
+      )[0];
+      const functionType = knownFunction?.returnType ?? inferredType ?? '반환 타입 확인 필요';
+      const observedArity = observedCalls.reduce((maximum, call) => Math.max(maximum, call.arguments.length), 0);
+      const parameters: FunctionParameterInfo[] = (knownFunction?.parameters ?? []).map((parameter) => ({
+        ...parameter,
+        range: first.range,
+      }));
+      const originLabel = knownFunction ? 'C 표준 라이브러리' : '외부/정의 미해결';
+      const originRule = knownFunction
+        ? 'ISO C 표준 라이브러리에서 정한 함수 시그니처를 사용하고, 현재 프로젝트의 호출 위치를 함께 표시합니다.'
+        : '열린 프로젝트에서 선언 또는 정의를 찾지 못했지만 코드 사용 위치는 확인했습니다.';
       registerSymbol({
         id: stableId(first.range.file, entry.kind, 'external-symbol', first.name, first.range.startLine),
         name: first.name,
         kind: entry.kind,
-        type: entry.kind === 'function' ? '반환 타입 확인 필요' : entry.kind === 'macro' ? '외부 매크로' : '외부 선언 타입 확인 필요',
-        signature: entry.kind === 'function' ? `${first.name}(...)` : undefined,
+        type: entry.kind === 'function' ? functionType : entry.kind === 'macro' ? '외부 매크로' : '외부 선언 타입 확인 필요',
+        signature: entry.kind === 'function' ? knownFunction?.signature ?? `${functionType} ${first.name}(${observedArity ? `호출부 인자 ${observedArity}개 · 선언 미확인` : '...'})` : undefined,
         scope: 'external',
         declaration: first.range,
-        parameters: [],
+        parameters,
         returnExpressions: [],
         fields: [],
         origin: {
           kind: 'unknown',
-          label: '외부/정의 미해결',
+          label: originLabel,
           confidence: 'limited',
-          rule: '열린 프로젝트에서 선언 또는 정의를 찾지 못했지만 코드 사용 위치는 확인했습니다.',
+          rule: originRule,
           anchors: entry.occurrences.slice(0, 12).map((occurrence) => occurrence.range),
         },
         references: [{ kind: 'declaration', range: first.range, container: first.container }],
         calls: [],
         callers: [],
-        sourceHash: entry.hash,
-        limitations: ['선언이 포함된 SDK 또는 외부 헤더가 프로젝트 범위에 없어 시그니처를 확정할 수 없습니다.'],
+        sourceHash: digest(`${entry.hash}\0${functionType}\0${observedArity}\0${knownFunction?.signature ?? ''}`),
+        limitations: knownFunction
+          ? ['플랫폼별 확장 동작과 실제 선언 헤더는 사용 중인 C 라이브러리 구현을 함께 확인해야 합니다.']
+          : ['선언이 포함된 SDK 또는 외부 헤더가 프로젝트 범위에 없어 정확한 매개변수 타입은 확정할 수 없습니다. 호출부에서 관찰한 인자와 결과 저장 위치를 대신 표시합니다.'],
         synthetic: 'external-symbol',
       });
     }
@@ -782,6 +872,7 @@ export class ProjectIndex {
           kind: occurrence.kind,
           range: occurrence.range,
           container: occurrence.container,
+          target: occurrence.target,
           expression: occurrence.expression,
           changeDescription: occurrence.changeDescription,
           valueSource: occurrence.valueSource,

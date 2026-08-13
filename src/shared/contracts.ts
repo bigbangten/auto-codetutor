@@ -93,6 +93,8 @@ export interface ReferenceInfo {
   kind: 'declaration' | 'definition' | 'read' | 'write' | 'call';
   range: SourceRange;
   container?: string;
+  /** Exact assignment/update target, for example entry.flDomain or ports[index].state. */
+  target?: string;
   expression?: string;
   changeDescription?: string;
   valueSource?: 'constant' | 'variable' | 'call' | 'expression' | 'increment' | 'decrement' | 'initializer';
