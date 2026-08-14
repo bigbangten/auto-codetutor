@@ -51,7 +51,7 @@ npm run verify
 npm run dist
 ```
 
-완성된 실행 파일은 `release-0.9.1/Auto-CodeTutor-0.9.1-portable.exe`에 생성됩니다.
+완성된 실행 파일은 `release-0.9.2/Auto-CodeTutor-0.9.2-portable.exe`에 생성됩니다.
 
 ## 데이터와 안전 원칙
 

@@ -98,11 +98,14 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 }
 #left-pane, #right-pane, #center-pane { min-width: 0; min-height: 0; overflow: hidden; }
 #left-pane { display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); }
-#right-pane { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); }
-#center-pane { position: relative; display: grid; grid-template-rows: 34px 40px 1fr; background: #1e1e1e; }
+#right-pane { container: right-panel / inline-size; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); }
+#center-pane { container: editor-panel / inline-size; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 34px auto minmax(0, 1fr); background: #1e1e1e; }
 .splitter { position: relative; z-index: 5; background: #181818; cursor: col-resize; }
 .splitter::after { content: ""; position: absolute; inset: 0 1px; background: transparent; }
 .splitter:hover::after, .splitter.dragging::after { background: var(--accent); }
+#workspace.resizing { cursor: col-resize; user-select: none; }
+#workspace.resizing #left-pane, #workspace.resizing #center-pane, #workspace.resizing #right-pane { pointer-events: none; }
+#workspace.resizing .semantic-progress-track span { transition: none; }
 
 .project-switcher { flex: 0 0 auto; border-bottom: 1px solid var(--line); background: #181818; }
 .project-switcher > header { min-height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 3px 8px 2px 12px; }
@@ -182,10 +185,11 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 #breadcrumbs { display: flex; align-items: center; gap: 5px; padding: 0 11px; overflow: hidden; border-bottom: 1px solid var(--line); color: var(--muted); white-space: nowrap; font-size: 11px; }
 #breadcrumbs span { overflow: hidden; text-overflow: ellipsis; }
 #breadcrumbs .sep { flex: 0 0 auto; color: #666; }
-#editor-toolbar { display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--line); background: #252526; font-size: 11px; }
+#editor-toolbar { width: 100%; min-width: 0; min-height: 40px; display: flex; align-items: center; gap: 6px; overflow: hidden; padding: 0 8px; border-bottom: 1px solid var(--line); background: #252526; font-size: 11px; }
 #current-file { min-width: 0; overflow: hidden; color: #ddd; text-overflow: ellipsis; white-space: nowrap; }
 .readonly-badge { padding: 1px 5px; border: 1px solid #4a4a4a; border-radius: 2px; color: var(--muted); font-size: 9px; }
 #selection-summary { flex: 1; overflow: hidden; color: var(--muted); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-break { display: none; }
 #editor { min-height: 0; }
 .monaco-editor .code-highlight-line { background: rgba(38, 79, 120, .68); border-top: 1px solid rgba(0, 122, 204, .55); border-bottom: 1px solid rgba(0, 122, 204, .35); }
 .monaco-editor .code-highlight-glyph { border-left: 3px solid #4fc1ff; margin-left: 3px; }
@@ -514,6 +518,37 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 #comment-preview { width: calc(100% - 28px); min-height: 0; margin: 0 14px 12px; resize: none; background: #181818; color: #d4d4d4; font: 12px/1.55 "Cascadia Mono", Consolas, monospace; tab-size: 4; }
 .dialog-shell > footer { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line); background: #181818; }
 .dialog-safety { margin-right: auto; color: #89d185; font-size: 10px; }
+
+@container editor-panel (max-width: 720px) {
+  #editor-toolbar { min-height: 76px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: 28px 28px; align-content: center; gap: 5px 6px; padding-block: 5px; }
+  #current-file { grid-column: 1 / 3; }
+  #editor-toolbar .readonly-badge { grid-column: 3; justify-self: start; }
+  #selection-summary { grid-column: 4; width: 100%; }
+  #editor-toolbar .toolbar-break { display: none; }
+  #ask-project { grid-column: 1; }
+  #ask-selection { grid-column: 2; }
+  #explain-selection { grid-column: 3; }
+  #generate-comments { grid-column: 4; }
+  #editor-toolbar > button { min-width: 0; min-height: 28px; overflow: hidden; padding-inline: 5px; text-overflow: ellipsis; }
+}
+
+@container editor-panel (max-width: 470px) {
+  #editor-toolbar { min-height: 142px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, 28px); }
+  #current-file { grid-column: 1 / 3; }
+  #editor-toolbar .readonly-badge { grid-column: 1; }
+  #selection-summary { grid-column: 2; }
+  #ask-project { grid-column: 1; }
+  #ask-selection { grid-column: 2; }
+  #explain-selection { grid-column: 1; }
+  #generate-comments { grid-column: 2; }
+}
+
+@container right-panel (max-width: 440px) {
+  .ai-controls { grid-template-columns: 74px minmax(100px, 1fr) 82px; grid-template-rows: 32px 24px; }
+  .ai-controls.global-ai-controls { flex: 0 0 76px; min-height: 76px; }
+  #fast-label { grid-column: 1; grid-row: 2; }
+  .auto-analysis { grid-column: 2 / 4; grid-row: 2; }
+}
 
 /* Readability pass: 14/20 body rhythm, 12/16 compact metadata, and AA-level
    foregrounds. The hierarchy intentionally mirrors a dense desktop IDE. */

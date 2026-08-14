@@ -30,6 +30,7 @@ import { renderGroundedMarkdown } from './markdown.js';
 import { describeCType } from '../shared/c-types.js';
 import { C_OPERATOR_TOKENS, describeCToken, isCReservedWord, isDirectNumericLiteral, type CTokenExplanation } from '../shared/c-glossary.js';
 import { removeCComments } from '../shared/c-comments.js';
+import { clampDraggedPaneWidth, clampPaneWidths } from '../shared/pane-layout.js';
 
 declare global { interface Window { codeTutor: CodeTutorApi } }
 
@@ -1640,13 +1641,10 @@ async function closeProject(root: string): Promise<void> {
 function applyPaneWidths(requestedLeft: number, requestedRight: number): void {
   const workspace = $('workspace');
   const total = workspace.clientWidth || window.innerWidth;
-  const minimumCenter = 360;
-  const left = Math.max(220, Math.min(requestedLeft, Math.min(420, total * 0.36)));
-  const availableRight = Math.max(340, total - left - minimumCenter - 8);
-  const right = Math.max(340, Math.min(requestedRight, Math.min(660, availableRight)));
+  const { left, right } = clampPaneWidths(total, requestedLeft, requestedRight);
   workspace.style.setProperty('--left-width', `${left}px`);
   workspace.style.setProperty('--right-width', `${right}px`);
-  editor.layout();
+  window.requestAnimationFrame(() => editor.layout());
 }
 
 function renderProjectWorkspace(settings: AppSettings): void {
@@ -1682,26 +1680,69 @@ function renderProjectWorkspace(settings: AppSettings): void {
 }
 
 function wireSplitters(): void {
-  const workspace = $('workspace'); let saveTimer: number | undefined;
-  const save = () => { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { if (!state.snapshot) return; const style = getComputedStyle(workspace); void window.codeTutor.saveUiState({ leftWidth: Number.parseFloat(style.getPropertyValue('--left-width')), rightWidth: Number.parseFloat(style.getPropertyValue('--right-width')) }); }, 250); };
+  const workspace = $('workspace');
+  const paneWidth = (name: '--left-width' | '--right-width'): number => {
+    const inline = Number.parseFloat(workspace.style.getPropertyValue(name));
+    return Number.isFinite(inline) ? inline : Number.parseFloat(getComputedStyle(workspace).getPropertyValue(name));
+  };
+  const save = () => {
+    if (!state.snapshot) return;
+    void window.codeTutor.saveUiState({ leftWidth: paneWidth('--left-width'), rightWidth: paneWidth('--right-width') });
+  };
   const wire = (id: string, side: 'left' | 'right') => {
     const splitter = $(id); splitter.addEventListener('pointerdown', (down) => {
-      splitter.classList.add('dragging'); splitter.setPointerCapture(down.pointerId);
-      const move = (event: PointerEvent) => {
-        const box = workspace.getBoundingClientRect();
-        const style = getComputedStyle(workspace);
-        const currentLeft = Number.parseFloat(style.getPropertyValue('--left-width'));
-        const currentRight = Number.parseFloat(style.getPropertyValue('--right-width'));
-        const value = side === 'left'
-          ? Math.max(220, Math.min(Math.min(520, box.width - currentRight - 368), event.clientX - box.left))
-          : Math.max(340, Math.min(Math.min(720, box.width - currentLeft - 368), box.right - event.clientX));
-        workspace.style.setProperty(side === 'left' ? '--left-width' : '--right-width', `${value}px`); editor.layout(); save();
+      if (down.button !== 0) return;
+      down.preventDefault();
+      splitter.classList.add('dragging'); workspace.classList.add('resizing');
+      splitter.setPointerCapture(down.pointerId);
+      editor.updateOptions({ automaticLayout: false });
+      const box = workspace.getBoundingClientRect();
+      const oppositeWidth = paneWidth(side === 'left' ? '--right-width' : '--left-width');
+      let pendingWidth: number | undefined;
+      let frame = 0;
+      let finished = false;
+
+      const flush = () => {
+        frame = 0;
+        if (pendingWidth === undefined) return;
+        workspace.style.setProperty(side === 'left' ? '--left-width' : '--right-width', `${pendingWidth}px`);
+        pendingWidth = undefined;
       };
-      const up = () => { splitter.classList.remove('dragging'); splitter.removeEventListener('pointermove', move); splitter.removeEventListener('pointerup', up); };
-      splitter.addEventListener('pointermove', move); splitter.addEventListener('pointerup', up);
+      const move = (event: PointerEvent) => {
+        const proposed = side === 'left' ? event.clientX - box.left : box.right - event.clientX;
+        pendingWidth = clampDraggedPaneWidth(box.width, side, proposed, oppositeWidth);
+        if (!frame) frame = window.requestAnimationFrame(flush);
+      };
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
+        flush();
+        splitter.classList.remove('dragging'); workspace.classList.remove('resizing');
+        splitter.removeEventListener('pointermove', move);
+        splitter.removeEventListener('pointerup', finish);
+        splitter.removeEventListener('pointercancel', finish);
+        splitter.removeEventListener('lostpointercapture', finish);
+        editor.updateOptions({ automaticLayout: true });
+        editor.layout();
+        save();
+      };
+      splitter.addEventListener('pointermove', move);
+      splitter.addEventListener('pointerup', finish);
+      splitter.addEventListener('pointercancel', finish);
+      splitter.addEventListener('lostpointercapture', finish);
     });
   };
   wire('left-splitter', 'left'); wire('right-splitter', 'right');
+
+  let resizeFrame = 0;
+  window.addEventListener('resize', () => {
+    if (resizeFrame) return;
+    resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = 0;
+      applyPaneWidths(paneWidth('--left-width'), paneWidth('--right-width'));
+    });
+  });
 }
 
 function hideEditorContextMenu(): void { $('editor-context-menu').hidden = true; }
