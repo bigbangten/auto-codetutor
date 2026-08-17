@@ -119,7 +119,7 @@ npm run dist
 The current build is generated at:
 
 ```text
-release-0.9.2/Auto-CodeTutor-0.9.2-portable.exe
+release-0.9.3/Auto-CodeTutor-0.9.3-portable.exe
 ```
 
 ## Data, Privacy, and Safety

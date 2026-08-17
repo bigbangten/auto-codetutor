@@ -79,6 +79,21 @@ test('global settings retain several open projects and the active project', asyn
   assert.equal((await reopened.get()).commentEffort, 'medium');
 });
 
+test('global settings allow the final open project to be closed', async (t) => {
+  const appData = await mkdtemp(path.join(os.tmpdir(), 'codetutor-settings-close-'));
+  t.after(() => rm(appData, { recursive: true, force: true }));
+  const settings = new GlobalSettingsStore(appData);
+
+  await settings.save({ openProjects: ['D:/only'], activeProject: 'D:/only' });
+  const closed = await settings.save({ openProjects: [], activeProject: undefined });
+
+  assert.deepEqual(closed.openProjects, []);
+  assert.equal(closed.activeProject, undefined);
+  const reopened = await new GlobalSettingsStore(appData).get();
+  assert.deepEqual(reopened.openProjects, []);
+  assert.equal(reopened.activeProject, undefined);
+});
+
 test('chat threads and the last selected chat survive reopening the project store', async (t) => {
   const data = await mkdtemp(path.join(os.tmpdir(), 'codetutor-chat-'));
   t.after(() => rm(data, { recursive: true, force: true }));

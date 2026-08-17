@@ -500,7 +500,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 
 .comment-dialog { width: min(920px, calc(100vw - 80px)); height: min(760px, calc(100vh - 70px)); padding: 0; border: 1px solid #666; border-radius: 3px; background: #1e1e1e; color: #ccc; box-shadow: 0 18px 60px #000c; }
 .comment-dialog::backdrop { background: #0009; }
-.dialog-shell { height: 100%; display: grid; grid-template-rows: auto auto auto auto auto auto 1fr auto; margin: 0; }
+.dialog-shell { height: 100%; min-height: 0; display: flex; flex-direction: column; margin: 0; overflow: hidden; }
 .dialog-shell > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 15px; border-bottom: 1px solid var(--line); background: #181818; }
 .dialog-shell > header small { color: #75beff; font: 9px Consolas, monospace; letter-spacing: .08em; }
 .dialog-shell > header h2 { margin: 3px 0 0; color: #eee; font-size: 16px; font-weight: 500; }
@@ -514,8 +514,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .comment-ai-options.disabled { opacity: .55; }
 .comment-request { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); color: #969696; font-size: 10px; }
 .comment-request textarea { min-height: 48px; resize: vertical; }
+.comment-review { min-height: 220px; flex: 1 1 auto; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
 .dialog-hint { margin: 0; padding: 7px 14px; background: #252526; color: #aaa; font: 10px Consolas, monospace; }
-#comment-preview { width: calc(100% - 28px); min-height: 0; margin: 0 14px 12px; resize: none; background: #181818; color: #d4d4d4; font: 12px/1.55 "Cascadia Mono", Consolas, monospace; tab-size: 4; }
+#comment-preview { width: calc(100% - 28px); height: calc(100% - 12px); min-height: 0; margin: 0 14px 12px; resize: none; background: #181818; color: #d4d4d4; font: 12px/1.55 "Cascadia Mono", Consolas, monospace; tab-size: 4; }
 .dialog-shell > footer { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line); background: #181818; }
 .dialog-safety { margin-right: auto; color: #89d185; font-size: 10px; }
 

@@ -220,9 +220,11 @@
         <p id="comment-ai-note">주석 생성 전용 설정 · 기본 Codex GPT-5.6-Sol · medium</p>
       </div>
       <label id="comment-instruction-row" class="comment-request" hidden><span>추가 요청</span><textarea id="comment-instruction" rows="2" placeholder="예: 영어로 아주 짧게, 함수 목적만 러프하게 설명해줘"></textarea></label>
-      <p id="comment-target-label" class="dialog-hint">코드 범위를 선택하세요.</p>
-      <div id="comment-status" class="result-status"></div>
-      <textarea id="comment-preview" spellcheck="false" readonly placeholder="생성 결과를 검토한 뒤 코드에 적용할 수 있습니다."></textarea>
+      <section class="comment-review" aria-label="생성된 주석 미리보기">
+        <p id="comment-target-label" class="dialog-hint">코드 범위를 선택하세요.</p>
+        <div id="comment-status" class="result-status"></div>
+        <textarea id="comment-preview" spellcheck="false" readonly placeholder="생성 결과를 검토한 뒤 코드에 적용할 수 있습니다."></textarea>
+      </section>
       <footer>
         <span class="dialog-safety">코드 토큰 변경이 감지되면 적용이 자동 차단됩니다.</span>
         <button id="comment-cancel" class="ghost" value="cancel">취소</button>

@@ -122,8 +122,8 @@ function installIpc(): void {
     const closedIndex = current.openProjects.indexOf(closedPath);
     const openProjects = current.openProjects.filter((item) => !sameProjectPath(item, closedPath));
     const activeClosed = sameProjectPath(project.root ?? current.activeProject, closedPath);
-    const nextProject = activeClosed && openProjects.length
-      ? openProjects[Math.min(closedIndex, openProjects.length - 1)]
+    const nextProject = activeClosed
+      ? (openProjects.length ? openProjects[Math.min(closedIndex, openProjects.length - 1)] : undefined)
       : current.activeProject;
     if (activeClosed) {
       await ai.resetProjectContext();
