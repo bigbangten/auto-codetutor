@@ -1,68 +1,150 @@
 # Auto CodeTutor
 
-Auto CodeTutor는 AI가 만든 임베디드 C 코드를 대신 수정하는 도구가 아니라, S32DS 프로젝트를 직접 이해하도록 돕는 독립 Windows 학습 앱입니다.
+**See the architecture. Trace the data. Understand the firmware.**
 
-- 제작자: 김영민
-- 이메일: bigbangten95@gmail.com
+[![Latest Release](https://img.shields.io/github/v/release/bigbangten/auto-codetutor?style=flat-square&label=release)](https://github.com/bigbangten/auto-codetutor/releases/latest)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4?style=flat-square)
+![Focus](https://img.shields.io/badge/focus-Embedded%20C-2EA043?style=flat-square)
+![Desktop](https://img.shields.io/badge/desktop-Electron-47848F?style=flat-square)
 
-## Windows 다운로드
+Auto CodeTutor is an AI-native Windows workspace that turns unfamiliar embedded C projects into an explorable map of execution, data, and intent. It combines deterministic local code analysis with evidence-grounded AI explanations, helping you understand what the code does, where it came from, and what may change when you edit it.
 
-최신 portable EXE는 [GitHub Releases](https://github.com/bigbangten/auto-codetutor/releases/latest)에서 받을 수 있습니다. 설치 과정 없이 실행할 수 있으며 Windows x64를 지원합니다.
+The core experience is designed for folder-based embedded C projects and is not tied to a single IDE. S32 Design Studio and NXP projects receive additional, purpose-built support for MEX-generated code, RTD/SDK provenance, and generated-code traceability.
 
-## 첫 완성본 기능
+> Auto CodeTutor is built to help you learn and understand code—not to silently rewrite it.
 
-- `.c`, `.h`, `.mex` 프로젝트 증분 인덱싱
-- 기본 접힘 상태의 프로젝트 탐색기와 함수·변수·파라미터·typedef·struct·union·enum·매크로 탐색
-- 모든 `src` 함수·변수·매개변수·타입·필드·매크로와 프로젝트 밖 SDK 심볼의 클릭 탐색
-- 변수 타입, 선언·정의, 읽기 위치와 값 변경 방식, struct/union 내부 필드와 필드별 의미 표시
-- 기본 정수·포인터·SDK 타입 설명과 함수 매개변수·실제 반환식·호출부 전달 인자 표시
-- 프로젝트 목적에 맞춘 사용자 기능 중심 실행 개요와 SRC / RTD·MEX·SDK 시각 구분
-- 코드 심볼 클릭 시 실행 개요에서 현재 단계 강조
-- MEX 생성 / RTD·SDK / AI 작성 확인 / 작성자 불명 출처 분류와 코드 근거
-- 읽기 전용 Monaco 코드 창과 모든 패널의 드래그 크기 조절
-- Claude/Codex 구독 CLI를 읽기 전용으로 실행하는 프로젝트 전체/심볼/선택 영역 한국어 해설·채팅과 명확한 대기·응답 중 상태
-- `src` 전체 심볼을 파일 단위로 묶어 미리 설명하고 재사용하는 전용 경량 백그라운드 분석
-- 마지막 작업공간 자동 복원, 왼쪽 PROJECTS 목록을 통한 여러 프로젝트 추가·전환·닫기, 프로젝트별 레퍼런스와 분석 캐시 유지
-- 코드 변경 감지 시 기존 분석 유지 또는 변경·신규 심볼만 재분석하는 선택 흐름
-- 마지막 대화 자동 복원과 프로젝트별 전체 채팅 기록 영구 저장
-- `#include`, `#define`, `volatile`, 기본 타입·제어문·연산자를 AI 호출 없이 즉시 설명하는 C 문법 사전
-- 함수·변수·타입 클릭 시 즉시 정보 갱신, `Ctrl+클릭` 또는 `F12` 정의 이동
-- 프로젝트 전체 질문이 기본이며, 드래그한 코드는 우클릭 메뉴로 질문에 첨부
-- 해설의 `[[상대경로:줄]]` 근거 검증, 문장 클릭 코드 이동·하이라이트
-- 기존 유지·교체·맞춤 요청·전체 제거를 지원하는 주석 미리보기와 안전 적용
-- 프로젝트별 채팅, 코드 변경 배지, 학습 노트와 3문항 이해도 체크
-- 프로젝트 가져오기·레퍼런스 지정·노트 내보내기와 편집·보기·이동 명령을 갖춘 Windows 메뉴
-- Windows/VS Code 접근성 기준을 반영한 14px 본문, 강화된 명암비와 키보드 포커스 표시
-- Windows portable exe
+## Download
 
-## 실행
+Download the latest portable build from [GitHub Releases](https://github.com/bigbangten/auto-codetutor/releases/latest).
+
+- Windows x64
+- No installer required
+- No API key required
+- Static analysis works even without an AI CLI
+
+## Why Auto CodeTutor?
+
+Traditional code browsers show symbols. AI chat tools explain snippets. Embedded IDEs expose low-level project details. Auto CodeTutor brings these perspectives together in one learning-focused workspace:
+
+- Navigate from a symbol to its definition, callers, callees, reads, writes, type, and members.
+- Understand assignments at field level, including what value is copied or computed.
+- See a purpose-oriented execution overview instead of an overwhelming raw call graph.
+- Connect AI explanations back to verified project-relative source locations.
+- Distinguish user code, generated code, and vendor SDK code.
+- Keep project analysis, conversations, references, and notes available across sessions.
+
+## Highlights
+
+### Understand the codebase
+
+- Incremental indexing for `.c`, `.h`, and `.mex` files
+- A collapsed-by-default project explorer for functions, variables, parameters, typedefs, structs, unions, enums, macros, and fields
+- Immediate symbol inspection for project code and referenced SDK symbols
+- Type, declaration, definition, scope, references, reads, writes, and assignment semantics
+- Clean struct and union member views with per-field meaning
+- Built-in explanations for primitive integers, pointers, qualifiers, SDK types, function parameters, actual return expressions, and call-site arguments
+- `Ctrl+Click` and `F12` definition navigation
+- A built-in C glossary for `#include`, `#define`, `volatile`, primitive types, control flow, and operators—without an AI request
+
+### Follow execution and data flow
+
+- A high-level execution overview organized around the project's practical purpose
+- Visual separation between user-focused `src` code and generated, RTD, or SDK infrastructure
+- Current-flow highlighting when a symbol is selected in the editor
+- Callers, callees, input parameters, return behavior, and call-site values
+- Field-level write tracking such as `entry.flDomain = floodDomain`
+- Read and write locations with project-relative paths
+
+### Learn with grounded AI
+
+- Project-wide, symbol-level, and selection-based explanations and chat
+- Clear queued, running, completed, and failed response states
+- Read-only integration with locally installed Codex and Claude subscription CLIs
+- No API key entry or storage
+- Lightweight background analysis that batches and reuses explanations for `src` symbols
+- Verified `[[relative/path.c:line]]` anchors that jump back to highlighted code
+- Reference-folder support for datasheets, manuals, notes, and page-level PDF citations
+- Persistent, project-specific chat history and learning notes
+- Three-question comprehension checks for active learning
+- Korean-first explanations, comments, and learning content
+
+### Built for real embedded projects
+
+- Evidence-based provenance labels for user-managed code, MEX-generated code, RTD/SDK code, and unresolved authorship
+- Deep S32DS/NXP support without making the core application IDE-dependent
+- Multiple imported projects with quick switching and project closing
+- Automatic restoration of the last workspace
+- Persistent analysis caches and reference folders per project
+- Change detection that lets you keep existing analysis or refresh only changed and newly discovered symbols
+- Resizable panels, a read-only Monaco editor, accessible keyboard focus, and VS Code-inspired contrast
+
+### Safer AI-assisted commenting
+
+- Preview comments before touching source files
+- Preserve existing comments, replace them, generate from a custom request, or remove comments
+- Choose the AI provider, model, and reasoning effort used for generation
+- Create a backup before applying changes
+- Automatically block the operation if non-comment code tokens would change
+
+## Getting Started
+
+1. Download and run the portable executable.
+2. Import an embedded C project folder.
+3. Let Auto CodeTutor build the local symbol index.
+4. Click a function, variable, type, macro, field, or C language token to inspect it.
+5. Open **Execution Overview** for the project-level story, or use **AI Question** for a deeper explanation.
+6. Optionally assign a reference folder containing datasheets and manuals.
+
+To use AI features, install and sign in to either the Codex CLI or Claude CLI with your existing subscription. Static navigation and code analysis remain available without either CLI.
+
+## Build from Source
 
 ```powershell
 npm install
 npm start
 ```
 
-Claude 또는 Codex를 쓰려면 해당 CLI가 설치되고 구독 계정 로그인이 끝나 있어야 합니다. API 키는 입력하거나 저장하지 않습니다. 정적 분석 기능은 AI CLI 없이도 동작합니다.
-
-검증 및 portable exe 빌드:
+Run the full verification suite:
 
 ```powershell
 npm run verify
+```
+
+Build the portable Windows executable:
+
+```powershell
 npm run dist
 ```
 
-완성된 실행 파일은 `release-0.9.2/Auto-CodeTutor-0.9.2-portable.exe`에 생성됩니다.
+The current build is generated at:
 
-## 데이터와 안전 원칙
+```text
+release-0.9.2/Auto-CodeTutor-0.9.2-portable.exe
+```
 
-- 평상시 코드 창은 읽기 전용입니다. 주석 적용을 명시적으로 누른 경우에만 원본 백업 후 저장하며, 주석 외 코드 토큰 변경이 감지되면 자동 차단합니다.
-- 인덱스·채팅·노트·퀴즈·심볼 사전 분석·UI 상태는 이전 버전과의 호환성을 위해 프로젝트의 `.codetutor-next/`에 저장합니다.
-- 기록 속 경로는 프로젝트 상대 경로입니다.
-- Codex는 `--sandbox read-only --ephemeral`, Claude는 safe/plan 모드와 `Read,Glob,Grep` 도구만으로 실행합니다.
-- AI가 답한 코드 앵커는 실제 파일과 줄을 다시 검증하며, 잘못된 앵커는 링크가 되지 않습니다.
+## Data, Privacy, and Safety
 
-## 분석 한계
+- The code editor is read-only during normal use.
+- Source files are written only after explicit confirmation in the comment workflow.
+- A backup is created before comment changes are applied.
+- Changes are rejected if the application detects modifications to non-comment code tokens.
+- Indexes, chats, notes, quizzes, background symbol analysis, and UI state are stored in the project's `.codetutor-next/` directory for backward compatibility.
+- Stored source locations use project-relative paths.
+- Codex runs with a read-only, ephemeral sandbox; Claude is restricted to safe/plan behavior and read-oriented tools.
+- AI-generated source anchors are checked against real files and line numbers before becoming clickable.
 
-Tree-sitter C++ WASM 문법(C의 상위 문법)을 이용해 C 원문을 분석합니다. 별도 clang 설치 없이 portable exe 안에서 작동하는 대신, 빌드 시점의 전처리 결과를 완전히 재현하지 않습니다. 함수 포인터, 콜백, 복잡한 매크로, 조건부 컴파일로 만들어지는 호출은 누락되거나 여러 분기가 함께 보일 수 있습니다. 앱은 이를 호출 그래프와 심볼 화면에 명시합니다.
+## Analysis Boundaries
 
-완성된 코드만으로 사람 작성과 AI 작성을 판정하지 않습니다. MEX·RTD는 경로와 생성 주석 같은 근거로 분류하며, AI 작성은 신뢰 가능한 작업 기록이 있을 때만 확정합니다.
+Auto CodeTutor analyzes C source with the Tree-sitter C++ WASM grammar, which is a practical superset for the supported C syntax and allows the portable application to work without a separate Clang installation.
+
+This source-level approach does not fully reproduce the compiler's preprocessed translation units. Calls created through function pointers, callbacks, complex macros, or conditional compilation may therefore be incomplete or may show multiple possible branches. Auto CodeTutor surfaces these limitations in its symbol and flow views instead of presenting uncertain results as facts.
+
+Authorship is never inferred from finished code alone. MEX and RTD classifications require evidence such as generated-file paths or generator comments, while AI authorship is confirmed only when a trusted activity record exists.
+
+## Author
+
+**Youngmin Kim (김영민)** · [bigbangten95@gmail.com](mailto:bigbangten95@gmail.com)
+
+---
+
+If Auto CodeTutor helps you make sense of a difficult firmware project, consider starring the repository and sharing your feedback through [GitHub Issues](https://github.com/bigbangten/auto-codetutor/issues).

@@ -1,7 +1,7 @@
 {
   "name": "codetutor-next",
   "version": "0.9.2",
-  "description": "S32DS C 프로젝트를 근거 중심으로 공부하는 독립 Windows 데스크톱 앱",
+  "description": "An AI-native Windows workspace for understanding embedded C projects through grounded analysis and visual execution flows.",
   "private": true,
   "author": "김영민 <bigbangten95@gmail.com>",
   "repository": {
