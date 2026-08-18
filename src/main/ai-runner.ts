@@ -94,7 +94,7 @@ function symbolContext(symbol: SymbolRecord): string {
     `호출자: ${symbol.callers.slice(0, 12).map((item) => `${item.name}(${item.arguments?.join(', ') ?? ''}) ${anchor(item.range)}`).join(', ') || '없음/확인되지 않음'}`,
     `호출 대상: ${symbol.calls.slice(0, 15).map((item) => `${item.name} ${anchor(item.range)}${item.resolved ? '' : ' (미해결)'}`).join(', ') || '없음'}`,
     `주요 사용처: ${symbol.references.slice(0, 20).map((item) => `${item.kind}${item.target ? ` ${item.target}` : ''} ${anchor(item.range)}${item.changeDescription ? ` (${item.changeDescription})` : ''}`).join(', ') || '없음'}`,
-    (symbol.fields.length || symbol.resolvedType?.fields.length) ? `내부 필드: ${(symbol.fields.length ? symbol.fields : symbol.resolvedType!.fields).map((field) => `${field.type} ${field.name} ${anchor(field.range)}`).join('; ')}` : '',
+    (symbol.fields.length || symbol.resolvedType?.fields.length) ? `내부 필드: ${(symbol.fields.length ? symbol.fields : symbol.resolvedType!.fields).map((field) => `${field.type} ${field.name}${field.valueExpression ? ` = ${field.valueExpression}` : ''}${field.calculatedValue ? ` (계산값 ${field.calculatedValue})` : ''} ${anchor(field.range)}`).join('; ')}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -102,11 +102,11 @@ function fieldsFor(symbol: SymbolRecord): FieldInfo[] {
   return symbol.fields.length ? symbol.fields : symbol.resolvedType?.fields ?? [];
 }
 
-function flattenFields(fields: FieldInfo[], prefix = ''): Array<{ path: string; type: string; anchor: string }> {
+function flattenFields(fields: FieldInfo[], prefix = ''): Array<{ path: string; type: string; value?: string; calculatedValue?: string; anchor: string }> {
   return fields.flatMap((field) => {
     const fieldPath = prefix ? `${prefix}.${field.name}` : field.name;
     return [
-      { path: fieldPath, type: field.type, anchor: anchor(field.range) },
+      { path: fieldPath, type: field.type, value: field.valueExpression, calculatedValue: field.calculatedValue, anchor: anchor(field.range) },
       ...flattenFields(field.children, fieldPath),
     ];
   });
@@ -266,6 +266,7 @@ focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘
       parameters: symbol.macro.parameters,
       replacement: clip(symbol.macro.replacement, 700),
       expandedReplacement: symbol.macro.expandedReplacement ? clip(symbol.macro.expandedReplacement, 700) : undefined,
+      calculatedValue: symbol.macro.calculatedValue,
     } : undefined,
     scope: symbol.scope,
     definition: anchor(symbol.definition ?? symbol.declaration),
@@ -276,8 +277,8 @@ focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘
     returnExpressions: symbol.returnExpressions,
     writes: symbol.references.filter((reference) => reference.kind === 'write').slice(0, 12).map((reference) => {
       const base = reference.changeDescription ?? reference.expression ?? anchor(reference.range);
-      return reference.valueExpression && reference.expandedValue
-        ? `${base} (매크로 치환: ${reference.valueExpression} → ${reference.expandedValue})`
+      return reference.valueExpression && (reference.expandedValue || reference.calculatedValue)
+        ? `${base} (${reference.expandedValue ? `매크로 치환: ${reference.valueExpression} → ${reference.expandedValue}` : `값: ${reference.valueExpression}`}${reference.calculatedValue ? `, 계산 결과: ${reference.calculatedValue}` : ''})`
         : base;
     }),
     fields: flattenFields(fieldsFor(symbol)),

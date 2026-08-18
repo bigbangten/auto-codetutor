@@ -30,9 +30,20 @@ import { renderGroundedMarkdown } from './markdown.js';
 import { describeCType } from '../shared/c-types.js';
 import { C_OPERATOR_TOKENS, describeCToken, isCReservedWord, isDirectNumericLiteral, type CTokenExplanation } from '../shared/c-glossary.js';
 import { removeCComments } from '../shared/c-comments.js';
+import { splitCommentText } from '../shared/c-comment-chunks.js';
 import { clampDraggedPaneWidth, clampPaneWidths } from '../shared/pane-layout.js';
 
 declare global { interface Window { codeTutor: CodeTutorApi } }
+
+const COMMENT_CHUNK_CHARACTERS = 48_000;
+
+interface CommentBatch {
+  target: AISelection;
+  chunks: AISelection[];
+  outputs: string[];
+  activeIndex: number;
+  request: Pick<AIRequest, 'commentMode' | 'commentLanguage' | 'commentInstruction' | 'engine' | 'model' | 'effort' | 'fast'>;
+}
 
 (self as typeof self & { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker: () => new Worker('./monaco-worker.js'),
@@ -67,6 +78,7 @@ const state: {
   activeCommentJob: string | null;
   commentTarget: AISelection | null;
   commentOutput: string;
+  commentBatch: CommentBatch | null;
   analysisStatus: BackgroundAnalysisStatus | null;
   projectInsight: ProjectInsight | null;
   symbolInsights: Map<string, SymbolInsight>;
@@ -75,7 +87,7 @@ const state: {
   engines: [], jobs: new Map(), activeExplainJob: null, currentChatId: null,
   currentNoteId: null, graph: null, graphFocusId: null, flowLocation: null,
   graphReset: null, expandedFolders: new Set(), decorations: [], settings: null, reference: null,
-  symbolSummaryJobs: new Map(), activeCommentJob: null, commentTarget: null, commentOutput: '',
+  symbolSummaryJobs: new Map(), activeCommentJob: null, commentTarget: null, commentOutput: '', commentBatch: null,
   analysisStatus: null, projectInsight: null, symbolInsights: new Map(),
 };
 
@@ -440,12 +452,23 @@ function renderFields(fields: FieldInfo[], descriptions: Record<string, string> 
     const code = document.createElement('code'); code.textContent = field.type;
     const name = document.createElement('span'); name.className = 'field-name'; name.textContent = field.name;
     descriptor.append(code, document.createTextNode(' '), name);
+    if (field.type === 'enum 값') {
+      const value = document.createElement('span'); value.className = 'enum-value';
+      value.textContent = `= ${field.valueExpression ?? field.calculatedValue ?? '값 확인 필요'}`;
+      descriptor.append(document.createTextNode(' '), value);
+    }
     if (field.inferred) {
       const inferred = document.createElement('span'); inferred.className = 'field-inferred'; inferred.textContent = '사용 코드에서 복원';
       descriptor.append(document.createTextNode(' '), inferred);
     }
     item.append(descriptor);
     const jump = document.createElement('button'); jump.className = 'code-anchor'; jump.textContent = `${field.range.file}:${field.range.startLine}`; jump.addEventListener('click', () => void navigate(field.range)); item.append(jump);
+    if (field.type === 'enum 값' && field.calculatedValue) {
+      const calculated = document.createElement('p'); calculated.className = 'field-enum-result';
+      const expanded = field.expandedValue ? `${field.expandedValue} → ` : '';
+      calculated.textContent = `${expanded}${field.calculatedValue}`;
+      item.append(calculated);
+    }
     const meaning = descriptions[fieldPath] ?? descriptions[field.name];
     if (meaning) { const description = document.createElement('p'); description.className = 'field-meaning'; description.textContent = meaning; item.append(description); }
     else {
@@ -615,13 +638,21 @@ function appendReferences(parent: HTMLElement, title: string, references: Symbol
       undefined,
       reference.changeDescription ?? reference.expression,
     );
-    if (reference.valueExpression && reference.expandedValue) {
+    if (reference.valueExpression && (reference.expandedValue || reference.calculatedValue)) {
       const expansion = document.createElement('span'); expansion.className = 'macro-expansion-detail';
-      const label = document.createElement('span'); label.textContent = '매크로 치환';
+      const label = document.createElement('span'); label.textContent = reference.expandedValue ? '매크로 치환' : '계산값';
       const original = document.createElement('code'); original.textContent = reference.valueExpression;
-      const arrow = document.createElement('span'); arrow.textContent = '→';
-      const expanded = document.createElement('code'); expanded.textContent = reference.expandedValue;
-      expansion.append(label, original, arrow, expanded);
+      expansion.append(label, original);
+      if (reference.expandedValue) {
+        const arrow = document.createElement('span'); arrow.textContent = '→';
+        const expanded = document.createElement('code'); expanded.textContent = reference.expandedValue;
+        expansion.append(arrow, expanded);
+      }
+      if (reference.calculatedValue) {
+        const equals = document.createElement('span'); equals.textContent = '=';
+        const calculated = document.createElement('code'); calculated.className = 'calculated'; calculated.textContent = reference.calculatedValue;
+        expansion.append(equals, calculated);
+      }
       link.append(expansion);
     }
     if (emphasis) link.classList.add('write-reference');
@@ -661,10 +692,18 @@ function appendMacroValue(parent: HTMLElement, symbol: SymbolRecord): void {
     const expandedCode = document.createElement('code'); expandedCode.textContent = expandedValue;
     expanded.append(expandedLabel, expandedCode); card.append(expanded);
   }
+  if (!symbol.macro.functionLike && symbol.macro.calculatedValue) {
+    const calculated = document.createElement('div'); calculated.className = 'macro-value-row calculated';
+    const calculatedLabel = document.createElement('span'); calculatedLabel.textContent = '계산 결과';
+    const calculatedCode = document.createElement('code'); calculatedCode.textContent = symbol.macro.calculatedValue;
+    calculated.append(calculatedLabel, calculatedCode); card.append(calculated);
+  }
   const note = document.createElement('small');
   note.textContent = symbol.macro.functionLike
     ? '함수형 매크로는 호출 인자에 따라 최종 코드가 달라집니다.'
-    : '프로젝트 내부 객체형 매크로를 재귀적으로 치환한 결과이며, C 수식 자체를 계산한 값은 아닙니다.';
+    : symbol.macro.calculatedValue
+      ? '정수 리터럴과 안전한 산술·비트 연산만 계산했습니다. 타입 폭, 캐스팅, 오버플로가 개입하면 컴파일러 결과와 달라질 수 있습니다.'
+      : '프로젝트 내부 객체형 매크로만 재귀적으로 치환했습니다. 컴파일러나 타입 정보가 필요한 식은 임의로 계산하지 않습니다.';
   card.append(note); parent.append(card);
 }
 
@@ -726,8 +765,9 @@ function renderSymbol(symbol: SymbolRecord): void {
   const visibleFields = symbol.fields.length ? symbol.fields : symbol.resolvedType?.fields ?? [];
   if (visibleFields.length) {
     const inferredType = !symbol.fields.length && symbol.resolvedType?.inferred;
+    const enumValues = visibleFields.some((field) => field.type === 'enum 값');
     const label = symbol.fields.length
-      ? (symbol.kind === 'union' ? '공용체(Union) 멤버' : '구성 필드')
+      ? (enumValues ? '열거 상수와 값' : symbol.kind === 'union' ? '공용체(Union) 멤버' : '구성 필드')
       : `${inferredType ? '코드에서 확인된 데이터 타입 구성' : '데이터 타입 구성'} · ${symbol.resolvedType!.name}`;
     const descriptions = state.symbolInsights.get(symbol.id)?.fieldDescriptions ?? {};
     const fields = section(label); fields.append(renderFields(visibleFields, descriptions)); content.append(fields);
@@ -1217,16 +1257,46 @@ async function handleJobEvent(event: AIJobEvent): Promise<void> {
     await refreshQuizzes();
   }
   if (event.job.kind === 'comment' && event.job.id === state.activeCommentJob) {
-    state.commentOutput = event.job.output;
-    const preview = event.job.output.match(/```(?:c|cpp|h)?\s*\r?\n([\s\S]*?)```/i)?.[1] ?? event.job.output;
-    $<HTMLTextAreaElement>('comment-preview').value = preview.trimEnd();
-    if (event.job.state === 'error') {
-      $('comment-status').className = 'result-status'; $('comment-status').textContent = `오류: ${event.job.error}`;
-    } else if (event.job.state === 'done') {
-      $('comment-status').className = 'result-status'; $('comment-status').textContent = '생성 완료 · 내용을 검토한 뒤 적용하세요.';
-      $<HTMLButtonElement>('comment-apply').disabled = false;
+    const preview = extractCommentCode(event.job.output);
+    const batch = state.commentBatch;
+    if (batch) {
+      const completed = batch.outputs.slice(0, batch.activeIndex).join('\n');
+      $<HTMLTextAreaElement>('comment-preview').value = [completed, preview].filter(Boolean).join('\n');
+      if (event.job.state === 'error' || event.job.state === 'cancelled') {
+        $('comment-status').className = 'result-status';
+        $('comment-status').textContent = event.job.state === 'cancelled' ? '주석 생성을 취소했습니다.' : `오류: ${event.job.error}`;
+        state.activeCommentJob = null; state.commentBatch = null;
+        setCommentGenerationRunning(false);
+      } else if (event.type === 'updated' && event.job.state === 'done') {
+        batch.outputs[batch.activeIndex] = preview;
+        if (batch.activeIndex + 1 < batch.chunks.length) {
+          void startCommentBatchChunk(batch.activeIndex + 1);
+        } else {
+          state.commentOutput = batch.outputs.join('\n');
+          $<HTMLTextAreaElement>('comment-preview').value = state.commentOutput;
+          $('comment-status').className = 'result-status';
+          $('comment-status').textContent = `생성 완료 · ${batch.chunks.length.toLocaleString('ko-KR')}개 구간을 합쳤습니다. 내용을 검토한 뒤 적용하세요.`;
+          state.activeCommentJob = null; state.commentBatch = null;
+          setCommentGenerationRunning(false);
+          $<HTMLButtonElement>('comment-apply').disabled = false;
+        }
+      }
+    } else {
+      state.commentOutput = event.job.output;
+      $<HTMLTextAreaElement>('comment-preview').value = preview;
+      if (event.job.state === 'error') {
+        $('comment-status').className = 'result-status'; $('comment-status').textContent = `오류: ${event.job.error}`;
+      } else if (event.job.state === 'done') {
+        $('comment-status').className = 'result-status'; $('comment-status').textContent = '생성 완료 · 내용을 검토한 뒤 적용하세요.';
+        $<HTMLButtonElement>('comment-apply').disabled = false;
+      }
     }
   }
+}
+
+function extractCommentCode(output: string): string {
+  const fenced = output.match(/```(?:c|cpp|h)?\s*\r?\n([\s\S]*?)```/i)?.[1] ?? output;
+  return fenced.replace(/\r\n/g, '\n').trimEnd();
 }
 
 async function currentSelection(): Promise<AISelection | null> {
@@ -1389,6 +1459,7 @@ async function exportLearningNotes(): Promise<void> {
 
 function handleAppCommand(command: AppCommand): void {
   if (command === 'import-project') { void openProject(); return; }
+  if (command === 'refresh-active-project') { void refreshActiveProject(); return; }
   if (command === 'close-active-project') {
     if (!state.snapshot) { toast('닫을 프로젝트가 없습니다.', true); return; }
     void closeProject(state.snapshot.rootPath); return;
@@ -1432,11 +1503,11 @@ async function resolveCommentTarget(scope = $<HTMLSelectElement>('comment-target
 async function updateCommentTarget(): Promise<void> {
   const target = await resolveCommentTarget();
   state.commentTarget = target;
-  const tooLarge = Boolean(target && target.text.length > 80_000);
+  const chunkCount = target ? splitCommentText(target.text, COMMENT_CHUNK_CHARACTERS).length : 0;
   $('comment-target-label').textContent = target
-    ? `${target.file}:${target.startLine}-${target.endLine} · ${target.text.split('\n').length.toLocaleString('ko-KR')}줄${tooLarge ? ' · 범위가 너무 큽니다. 함수 또는 80,000자 이하 영역을 선택하세요.' : ''}`
+    ? `${target.file}:${target.startLine}-${target.endLine} · ${target.text.split('\n').length.toLocaleString('ko-KR')}줄${chunkCount > 1 ? ` · 대형 범위는 ${chunkCount.toLocaleString('ko-KR')}개 구간으로 나누어 생성` : ''}`
     : '선택한 범위에 적용할 코드가 없습니다.';
-  $<HTMLButtonElement>('comment-create').disabled = !target || tooLarge;
+  $<HTMLButtonElement>('comment-create').disabled = !target;
   $<HTMLButtonElement>('comment-apply').disabled = true;
   state.commentOutput = ''; $<HTMLTextAreaElement>('comment-preview').value = '';
 }
@@ -1455,10 +1526,19 @@ function updateCommentMode(clearPreview = true): void {
   if (clearPreview) {
     state.commentOutput = '';
     state.activeCommentJob = null;
+    state.commentBatch = null;
     $<HTMLTextAreaElement>('comment-preview').value = '';
     $<HTMLButtonElement>('comment-apply').disabled = true;
     $('comment-status').textContent = '';
   }
+}
+
+function setCommentGenerationRunning(running: boolean): void {
+  for (const id of ['comment-target', 'comment-mode', 'comment-language', 'comment-instruction', 'comment-ai-engine', 'comment-ai-model', 'comment-ai-effort', 'comment-ai-fast']) {
+    $<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(id).disabled = running;
+  }
+  if (!running) updateCommentMode(false);
+  $<HTMLButtonElement>('comment-create').disabled = running || !state.commentTarget;
 }
 
 async function openCommentDialog(preferred?: 'selection' | 'symbol' | 'file'): Promise<void> {
@@ -1483,7 +1563,6 @@ async function openCommentDialog(preferred?: 'selection' | 'symbol' | 'file'): P
 async function createComments(): Promise<void> {
   const target = await resolveCommentTarget();
   if (!target) { toast('주석을 생성할 코드 범위를 선택하세요.', true); return; }
-  if (target.text.length > 80_000) { toast('주석 생성 범위가 너무 큽니다. 함수 또는 80,000자 이하 영역을 선택하세요.', true); return; }
   const mode = $<HTMLSelectElement>('comment-mode').value as NonNullable<AIRequest['commentMode']>;
   const instruction = $<HTMLTextAreaElement>('comment-instruction').value.trim();
   if (mode === 'custom' && !instruction) { toast('원하는 주석 방식이나 언어를 추가 요청에 입력하세요.', true); return; }
@@ -1499,20 +1578,53 @@ async function createComments(): Promise<void> {
     $<HTMLButtonElement>('comment-apply').disabled = false;
     return;
   }
-  const language = $<HTMLSelectElement>('comment-language').value === 'en' ? '영어' : '한국어';
+  const languageValue = $<HTMLSelectElement>('comment-language').value as 'ko' | 'en';
+  const language = languageValue === 'en' ? '영어' : '한국어';
   await persistCommentAISettings();
   const commentAI = selectedCommentAI();
+  const rawChunks = splitCommentText(target.text, COMMENT_CHUNK_CHARACTERS);
+  const chunks = await Promise.all(rawChunks.map(async (chunk) => ({
+    file: target.file,
+    startLine: target.startLine + chunk.startLineOffset,
+    endLine: target.startLine + chunk.endLineOffset,
+    text: chunk.text,
+    symbolId: rawChunks.length === 1 ? target.symbolId : undefined,
+    codeHash: await sha256(chunk.text),
+  } satisfies AISelection)));
+  state.commentBatch = {
+    target,
+    chunks,
+    outputs: Array.from({ length: chunks.length }, () => ''),
+    activeIndex: 0,
+    request: {
+      commentMode: mode,
+      commentLanguage: languageValue,
+      commentInstruction: mode === 'custom' ? instruction : undefined,
+      ...commentAI,
+    },
+  };
+  setCommentGenerationRunning(true);
   $('comment-status').className = 'result-status running';
-  $('comment-status').textContent = `${commentAI.engine === 'codex' ? 'Codex' : 'Claude'} · ${commentAI.model} · ${commentAI.effort}${commentAI.fast ? ' · FAST' : ''}로 ${mode === 'custom' ? '요청 맞춤' : language} 주석 생성 중…`;
+  $('comment-status').textContent = `${commentAI.engine === 'codex' ? 'Codex' : 'Claude'} · ${commentAI.model} · ${commentAI.effort}${commentAI.fast ? ' · FAST' : ''}로 ${mode === 'custom' ? '요청 맞춤' : language} 주석 생성 준비 중…`;
+  await startCommentBatchChunk(0);
+}
+
+async function startCommentBatchChunk(index: number): Promise<void> {
+  const batch = state.commentBatch;
+  if (!batch || index < 0 || index >= batch.chunks.length) return;
+  batch.activeIndex = index;
+  $('comment-status').className = 'result-status running';
+  $('comment-status').textContent = `주석 생성 중 · ${index + 1}/${batch.chunks.length} 구간 (${batch.chunks[index]!.startLine}-${batch.chunks[index]!.endLine}줄)`;
   const job = await guarded(() => window.codeTutor.startAI({
     kind: 'comment',
-    selection: target,
-    commentMode: mode,
-    commentLanguage: $<HTMLSelectElement>('comment-language').value as 'ko' | 'en',
-    commentInstruction: mode === 'custom' ? instruction : undefined,
-    ...commentAI,
+    selection: batch.chunks[index],
+    ...batch.request,
   }), 'AI 주석 생성');
-  if (!job) return;
+  if (!job) {
+    state.activeCommentJob = null; state.commentBatch = null;
+    setCommentGenerationRunning(false);
+    return;
+  }
   state.activeCommentJob = job.id; state.jobs.set(job.id, job); renderJobs();
 }
 
@@ -1601,6 +1713,7 @@ function renderSnapshot(snapshot: ProjectSnapshot): void {
   $('project-limitations').replaceChildren(...snapshot.limitations.map((text) => { const item = document.createElement('li'); item.textContent = text; return item; }));
   $<HTMLButtonElement>('ask-project').disabled = false; $<HTMLButtonElement>('explain-selection').disabled = false;
   $<HTMLButtonElement>('reference-button').disabled = false;
+  $<HTMLButtonElement>('refresh-project').disabled = false;
   setIndexState('준비', 'ready'); renderProjectNavigator($<HTMLInputElement>('file-search').value); updateBreadcrumbs(); updateQuestionContext(); updateExplainScope();
   if (indexChanged && !projectChanged && previousSymbolId) void selectSymbol(previousSymbolId);
 }
@@ -1628,17 +1741,7 @@ function promptForAnalysisChange(cache: AnalysisCacheState): Promise<'keep' | 'u
   return pendingAnalysisChoice;
 }
 
-async function resolveAnalysisPolicy(ui: Awaited<ReturnType<CodeTutorApi['getUiState']>>, settings: AppSettings): Promise<void> {
-  const cache = await guarded(() => window.codeTutor.getAnalysisCacheState(), '분석 캐시 확인');
-  if (!cache) return;
-  let mode: 'keep' | 'update' = 'update';
-  if (cache.changed) {
-    if (ui.analysisDecisionHash === cache.currentHash) mode = ui.keepStaleAnalysis ? 'keep' : 'update';
-    else {
-      mode = await promptForAnalysisChange(cache);
-      await window.codeTutor.saveUiState({ analysisDecisionHash: cache.currentHash, keepStaleAnalysis: mode === 'keep' });
-    }
-  }
+async function applyAnalysisCacheMode(cache: AnalysisCacheState, mode: 'keep' | 'update', settings: AppSettings): Promise<void> {
   const applied = await guarded(() => window.codeTutor.setAnalysisCacheMode({ mode, sourceHash: cache.currentHash }), '분석 캐시 선택');
   if (applied === null) return;
   if (mode === 'keep') {
@@ -1655,6 +1758,20 @@ async function resolveAnalysisPolicy(ui: Awaited<ReturnType<CodeTutorApi['getUiS
   if (settings.autoAnalyzeSymbols || cache.changed) void startBackgroundAnalysis();
 }
 
+async function resolveAnalysisPolicy(ui: Awaited<ReturnType<CodeTutorApi['getUiState']>>, settings: AppSettings): Promise<void> {
+  const cache = await guarded(() => window.codeTutor.getAnalysisCacheState(), '분석 캐시 확인');
+  if (!cache) return;
+  let mode: 'keep' | 'update' = 'update';
+  if (cache.changed) {
+    if (ui.analysisDecisionHash === cache.currentHash) mode = ui.keepStaleAnalysis ? 'keep' : 'update';
+    else {
+      mode = await promptForAnalysisChange(cache);
+      await window.codeTutor.saveUiState({ analysisDecisionHash: cache.currentHash, keepStaleAnalysis: mode === 'keep' });
+    }
+  }
+  await applyAnalysisCacheMode(cache, mode, settings);
+}
+
 async function openProject(root?: string): Promise<void> {
   const selected = root ?? await window.codeTutor.pickProject(); if (!selected) return;
   setIndexState('인덱싱…', 'busy'); setStatus('프로젝트 C 파일을 인덱싱하고 있습니다…');
@@ -1667,6 +1784,48 @@ async function openProject(root?: string): Promise<void> {
   await Promise.all([refreshGraph(), refreshChats(ui.lastChatId), refreshNotes(), refreshQuizzes(), refreshReference()]);
   const current = await window.codeTutor.getSettings(); state.settings = current; renderProjectWorkspace(current); setStatus(`인덱싱 완료 · 구문 오류 표시 ${snapshot.stats.parseErrors}건`);
   await resolveAnalysisPolicy(ui, current);
+}
+
+async function refreshActiveProject(): Promise<void> {
+  if (!state.snapshot) { toast('새로고침할 프로젝트가 없습니다.', true); return; }
+  const button = $<HTMLButtonElement>('refresh-project');
+  const currentFile = state.currentFile;
+  button.disabled = true; button.classList.add('spinning');
+  setIndexState('새로고침…', 'busy'); setStatus('프로젝트 변경 사항을 확인하고 있습니다…');
+  try {
+    const snapshot = await guarded(() => window.codeTutor.refreshProject(), '프로젝트 새로고침');
+    if (!snapshot) { setIndexState('오류'); return; }
+    renderSnapshot(snapshot); $('welcome').hidden = true;
+    if (currentFile && snapshot.files.some((file) => file.path === currentFile)) await openFile(currentFile);
+    await refreshGraph($<HTMLSelectElement>('flow-root').value || undefined);
+    const [cache, settings] = await Promise.all([
+      guarded(() => window.codeTutor.getAnalysisCacheState(), '변경된 심볼 확인'),
+      window.codeTutor.getSettings(),
+    ]);
+    state.settings = settings; renderProjectWorkspace(settings);
+    if (!cache) return;
+    if (!cache.changed) {
+      await refreshProjectInsight();
+      if (state.currentSymbol) await loadSymbolInsight(state.currentSymbol, true);
+      setStatus('프로젝트 새로고침 완료 · 코드 변경 사항 없음');
+      toast('코드 변경 사항이 없습니다. 기존 심볼 분석을 그대로 사용합니다.');
+      return;
+    }
+    const mode = await promptForAnalysisChange(cache);
+    await window.codeTutor.saveUiState({ analysisDecisionHash: cache.currentHash, keepStaleAnalysis: mode === 'keep' });
+    await applyAnalysisCacheMode(cache, mode, settings);
+    if (mode === 'update') {
+      setStatus(`프로젝트 갱신 완료 · 변경·새 심볼 ${(cache.staleCount + cache.newCount).toLocaleString('ko-KR')}개를 증분 분석합니다.`);
+      toast('변경된 심볼만 다시 분석하고, 일치하는 기존 설명은 재사용합니다.');
+    } else {
+      setStatus('프로젝트 갱신 완료 · 기존 분석 유지');
+      toast('코드는 새로 읽었으며, 기존 분석 설명은 사용자의 선택대로 유지합니다.');
+    }
+  } finally {
+    button.classList.remove('spinning');
+    button.disabled = !state.snapshot;
+    if (state.snapshot) setIndexState('준비', 'ready');
+  }
 }
 
 async function closeProject(root: string): Promise<void> {
@@ -1812,6 +1971,7 @@ async function showEditorContextMenu(clientX: number, clientY: number): Promise<
 
 function wireUi(): void {
   $('open-project').addEventListener('click', () => void openProject()); $('welcome-open').addEventListener('click', () => void openProject());
+  $('refresh-project').addEventListener('click', () => void refreshActiveProject());
   $<HTMLInputElement>('file-search').addEventListener('input', (event) => renderProjectNavigator((event.target as HTMLInputElement).value));
   document.querySelectorAll<HTMLButtonElement>('[data-left-view]').forEach((button) => button.addEventListener('click', () => {
     document.querySelectorAll<HTMLButtonElement>('[data-left-view]').forEach((item) => item.classList.toggle('active', item === button)); $('file-tree').hidden = button.dataset.leftView !== 'files'; $('symbol-list').hidden = button.dataset.leftView !== 'symbols';

@@ -40,7 +40,10 @@
       <section class="project-switcher" aria-labelledby="project-switcher-title">
         <header>
           <span id="project-switcher-title" class="eyebrow">PROJECTS</span>
-          <button id="open-project" class="icon project-add" type="button" title="프로젝트 가져오기" aria-label="프로젝트 가져오기">＋</button>
+          <div class="project-header-actions">
+            <button id="refresh-project" class="icon project-refresh" type="button" title="현재 프로젝트 새로고침 (F5)" aria-label="현재 프로젝트 새로고침" disabled>↻</button>
+            <button id="open-project" class="icon project-add" type="button" title="프로젝트 가져오기" aria-label="프로젝트 가져오기">＋</button>
+          </div>
         </header>
         <div id="project-list" class="project-list" role="listbox" aria-label="가져온 프로젝트">
           <p class="project-list-empty">가져온 프로젝트가 없습니다.</p>

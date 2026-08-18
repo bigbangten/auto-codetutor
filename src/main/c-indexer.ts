@@ -18,6 +18,7 @@ import type {
   SymbolSummary,
 } from '../shared/contracts.js';
 import { isCReservedWord } from '../shared/c-glossary.js';
+import { calculateCIntegerExpression, formatCIntegerValue } from '../shared/c-integer-expression.js';
 import { expandObjectLikeMacros } from '../shared/c-macros.js';
 import { classifyOrigin, type MexInventory } from './origin.js';
 
@@ -272,6 +273,27 @@ function fieldChildren(file: string, specifier: SyntaxNode): FieldInfo[] {
   return fields;
 }
 
+function enumChildren(file: string, specifier: SyntaxNode): FieldInfo[] {
+  const body = specifier.childForFieldName('body')
+    ?? specifier.namedChildren.find((child) => child.type === 'enumerator_list');
+  if (!body) return [];
+  return body.namedChildren
+    .filter((child) => child.type === 'enumerator')
+    .map((enumerator) => {
+      const nameNode = enumerator.childForFieldName('name')
+        ?? enumerator.namedChildren.find((child) => child.type === 'identifier');
+      const valueNode = enumerator.childForFieldName('value')
+        ?? enumerator.namedChildren.find((child) => child.id !== nameNode?.id);
+      return {
+        name: nameNode?.text ?? enumerator.text,
+        type: 'enum 값',
+        range: rangeOf(file, nameNode ?? enumerator),
+        children: [],
+        valueExpression: valueNode?.text.trim(),
+      };
+    });
+}
+
 function isDefinitionNode(node: SyntaxNode, definitions: Set<string>): boolean {
   return definitions.has(`${node.startIndex}:${node.endIndex}`);
 }
@@ -467,7 +489,7 @@ export class CParser {
       if (!nameNode) continue;
       const kind = node.type.replace('_specifier', '') as 'struct' | 'union' | 'enum';
       const fields = kind === 'enum'
-        ? (node.childForFieldName('body')?.namedChildren ?? []).map((child) => ({ name: child.childForFieldName('name')?.text ?? child.text, type: 'enum 값', range: rangeOf(file.path, child), children: [] }))
+        ? enumChildren(file.path, node)
         : fieldChildren(file.path, node);
       const typeSymbol = addSymbol({
         nameNode,
@@ -495,7 +517,9 @@ export class CParser {
         kind: 'typedef',
         type: aggregateKind ? `${aggregateKind}${aggregateName ? ` ${aggregateName}` : ' (anonymous)'}` : typeNode?.text.replace(/\s+/g, ' ').trim() || 'typedef',
         scope: 'global',
-        fields: typeNode && ['struct_specifier', 'union_specifier'].includes(typeNode.type) ? fieldChildren(file.path, typeNode) : [],
+        fields: typeNode?.type === 'enum_specifier'
+          ? enumChildren(file.path, typeNode)
+          : typeNode && ['struct_specifier', 'union_specifier'].includes(typeNode.type) ? fieldChildren(file.path, typeNode) : [],
       });
     }
 
@@ -605,6 +629,41 @@ function expandMacrosAt(
   return expandObjectLikeMacros(expression, (name) => macroDefinitionAt(name, range, byName)?.macro?.replacement);
 }
 
+function clearCalculatedFieldValues(fields: FieldInfo[]): void {
+  for (const field of fields) {
+    field.expandedValue = undefined;
+    field.calculatedValue = undefined;
+    clearCalculatedFieldValues(field.children);
+  }
+}
+
+function resolveEnumValues(fields: FieldInfo[], byName: Map<string, SymbolRecord[]>): void {
+  if (!fields.some((field) => field.type === 'enum 값')) return;
+  const previous = new Map<string, string>();
+  let nextValue: bigint | undefined = 0n;
+  for (const field of fields) {
+    if (field.type !== 'enum 값') continue;
+    let value: bigint | undefined;
+    if (field.valueExpression) {
+      const macroExpanded = expandMacrosAt(field.valueExpression, field.range, byName);
+      const expanded = expandObjectLikeMacros(macroExpanded, (name) => previous.get(name));
+      const result = calculateCIntegerExpression(expanded);
+      value = result?.value;
+      field.expandedValue = expanded !== field.valueExpression ? concise(expanded) : undefined;
+      field.calculatedValue = result?.display;
+    } else if (nextValue !== undefined) {
+      value = nextValue;
+      field.calculatedValue = formatCIntegerValue(value);
+    }
+    if (value === undefined) {
+      nextValue = undefined;
+      continue;
+    }
+    previous.set(field.name, value.toString(10));
+    nextValue = value + 1n;
+  }
+}
+
 const AGGREGATE_KINDS = new Set<SymbolKind>(['typedef', 'struct', 'union', 'enum']);
 const TYPE_NOISE = new Set([
   'const', 'volatile', 'static', 'extern', 'register', 'signed', 'unsigned', 'short', 'long',
@@ -674,7 +733,11 @@ export class ProjectIndex {
     for (const file of parsedFiles) {
       for (const symbol of file.symbols) {
         symbol.resolvedType = undefined;
-        if (symbol.macro) symbol.macro.expandedReplacement = undefined;
+        clearCalculatedFieldValues(symbol.fields);
+        if (symbol.macro) {
+          symbol.macro.expandedReplacement = undefined;
+          symbol.macro.calculatedValue = undefined;
+        }
         symbol.references = [{
           kind: symbol.definition ? 'definition' : 'declaration',
           range: symbol.definition ?? symbol.declaration,
@@ -736,6 +799,11 @@ export class ProjectIndex {
         symbol.definition ?? symbol.declaration,
         this.byName,
       ));
+      symbol.macro.calculatedValue = calculateCIntegerExpression(symbol.macro.expandedReplacement)?.display;
+    }
+
+    for (const symbol of this.symbols) {
+      resolveEnumValues(symbol.fields, this.byName);
     }
 
     // Types supplied by the compiler, libc, lwIP, or an SDK header outside the opened
@@ -927,6 +995,7 @@ export class ProjectIndex {
         if (target) {
           const valueExpression = occurrence.valueExpression ? concise(occurrence.valueExpression) : undefined;
           const expanded = valueExpression ? concise(expandMacrosAt(valueExpression, occurrence.range, this.byName)) : undefined;
+          const calculatedValue = expanded ? calculateCIntegerExpression(expanded)?.display : undefined;
           target.references.push({
             kind: occurrence.kind,
             range: occurrence.range,
@@ -936,6 +1005,7 @@ export class ProjectIndex {
             changeDescription: occurrence.changeDescription,
             valueExpression,
             expandedValue: expanded && expanded !== valueExpression ? expanded : undefined,
+            calculatedValue,
             valueSource: occurrence.valueSource,
           });
         }

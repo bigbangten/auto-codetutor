@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import './build.mjs';
 
-const child = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['electron', '.'], {
+const require = createRequire(import.meta.url);
+const electron = require('electron');
+const child = spawn(electron, ['.'], {
   stdio: 'inherit',
   shell: false,
 });

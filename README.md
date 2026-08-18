@@ -62,7 +62,8 @@ Traditional code browsers show symbols. AI chat tools explain snippets. Embedded
 - Read-only integration with locally installed Codex and Claude subscription CLIs
 - No API key entry or storage
 - Lightweight background analysis that batches and reuses explanations for `src` symbols
-- Immediate object-like macro values and recursive macro expansion at variable write sites
+- Immediate object-like macro values, recursive expansion, and safe integer-expression evaluation with context-appropriate binary, decimal, or hexadecimal output
+- Enum member inspection with explicit, implicit, and safely calculated values
 - Clickable explanation paragraphs, lists, and code examples that jump to the nearest verified `[[relative/path.c:line]]` evidence
 - Reference-folder support for datasheets, manuals, notes, and page-level PDF citations
 - Persistent, project-specific chat history and learning notes
@@ -77,6 +78,7 @@ Traditional code browsers show symbols. AI chat tools explain snippets. Embedded
 - Automatic restoration of the last workspace
 - Persistent analysis caches and reference folders per project
 - Change detection that lets you keep existing analysis or refresh only changed and newly discovered symbols
+- One-click project refresh with an explicit no-change result and incremental re-analysis when code has changed
 - Resizable panels, a read-only Monaco editor, accessible keyboard focus, and VS Code-inspired contrast
 
 ### Safer AI-assisted commenting
@@ -84,6 +86,7 @@ Traditional code browsers show symbols. AI chat tools explain snippets. Embedded
 - Preview comments before touching source files
 - Preserve existing comments, replace them, generate from a custom request, or remove comments
 - Choose the AI provider, model, and reasoning effort used for generation
+- Comment entire large files: oversized targets are split at stable code boundaries and merged into one reviewable preview
 - Create a backup before applying changes
 - Automatically block the operation if non-comment code tokens would change
 
@@ -120,7 +123,7 @@ npm run dist
 The current build is generated at:
 
 ```text
-release-0.9.5/Auto-CodeTutor-0.9.5-portable.exe
+release-0.9.6/Auto-CodeTutor-0.9.6-portable.exe
 ```
 
 ## Data, Privacy, and Safety

@@ -6,6 +6,7 @@ const invoke = <T>(channel: string, value?: unknown): Promise<T> => ipcRenderer.
 const api: CodeTutorApi = {
   pickProject: () => invoke('project:pick'),
   openProject: (rootPath) => invoke('project:open', rootPath),
+  refreshProject: () => invoke('project:refresh'),
   closeProject: (rootPath) => invoke('project:close', rootPath),
   getSnapshot: () => invoke('project:snapshot'),
   readSource: (relativePath) => invoke('source:read', relativePath),

@@ -134,12 +134,37 @@ void Configure(void) {
   assert.equal(active?.macro?.replacement, 'BASE_PORT');
   assert.equal(active?.macro?.expandedReplacement, '500U');
   assert.equal(next?.macro?.expandedReplacement, '(500U + 1U)');
+  assert.equal(next?.macro?.calculatedValue, '501 (10진수)');
   assert.match(active?.signature ?? '', /^#define ACTIVE_PORT BASE_PORT/);
 
   const port = index.symbols.find((symbol) => symbol.name === 'port' && symbol.kind === 'variable');
   const writes = port?.references.filter((reference) => reference.kind === 'write') ?? [];
   assert.ok(writes.some((reference) => reference.valueExpression === 'ACTIVE_PORT' && reference.expandedValue === '500U'));
-  assert.ok(writes.some((reference) => reference.valueExpression === 'NEXT_PORT' && reference.expandedValue === '(500U + 1U)'));
+  assert.ok(writes.some((reference) => reference.valueExpression === 'NEXT_PORT'
+    && reference.expandedValue === '(500U + 1U)'
+    && reference.calculatedValue === '501 (10진수)'));
+});
+
+test('typedef enum exposes explicit and implicit member values', async () => {
+  const parser = new CParser(runtime, grammar);
+  const mex = parseMexInventory([]);
+  const file: ProjectFile = { path: 'src/state.c', kind: 'c', size: 220 };
+  const parsed = await parser.parse(file, `
+    #define STAGE_BASE (1U << 2)
+    typedef enum {
+      STAGE_IDLE = 0U,
+      STAGE_READY = STAGE_BASE,
+      STAGE_RUNNING,
+      STAGE_FAILED = 0x10U
+    } stage_t;
+  `, mex);
+  const index = new ProjectIndex(path.resolve('.'), [parsed]);
+  const type = index.symbols.find((symbol) => symbol.name === 'stage_t' && symbol.kind === 'typedef');
+  assert.deepEqual(type?.fields.map((field) => field.name), ['STAGE_IDLE', 'STAGE_READY', 'STAGE_RUNNING', 'STAGE_FAILED']);
+  assert.equal(type?.fields[0]?.calculatedValue, '0 (10진수)');
+  assert.match(type?.fields[1]?.calculatedValue ?? '', /0b100.*4.*0x4/);
+  assert.equal(type?.fields[2]?.calculatedValue, '5 (10진수)');
+  assert.match(type?.fields[3]?.calculatedValue ?? '', /0x10.*16/);
 });
 
 test('C language qualifiers never become unresolved external variables', async () => {

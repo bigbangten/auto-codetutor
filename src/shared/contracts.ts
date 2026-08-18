@@ -32,6 +32,12 @@ export interface FieldInfo {
   type: string;
   range: SourceRange;
   children: FieldInfo[];
+  /** Explicit enum initializer, for example 1U << 3. */
+  valueExpression?: string;
+  /** Macro/earlier-enumerator expanded expression when it differs from the source. */
+  expandedValue?: string;
+  /** Safely calculated integer value in a learning-friendly radix. */
+  calculatedValue?: string;
   /** The declaration was unavailable, so this member was recovered from a . / -> use site. */
   inferred?: boolean;
 }
@@ -101,6 +107,8 @@ export interface ReferenceInfo {
   valueExpression?: string;
   /** Object-like macros recursively expanded at the use site, for example 500U. */
   expandedValue?: string;
+  /** Safely calculated integer result after macro expansion. */
+  calculatedValue?: string;
   valueSource?: 'constant' | 'variable' | 'call' | 'expression' | 'increment' | 'decrement' | 'initializer';
 }
 
@@ -111,6 +119,8 @@ export interface MacroInfo {
   replacement: string;
   /** Object-like project macros recursively expanded without evaluating the C expression. */
   expandedReplacement?: string;
+  /** Safely calculated integer result when the replacement is a portable constant expression subset. */
+  calculatedValue?: string;
 }
 
 export interface CallInfo {
@@ -408,6 +418,7 @@ export interface CommentApplyResult {
 
 export type AppCommand =
   | 'import-project'
+  | 'refresh-active-project'
   | 'close-active-project'
   | 'pick-reference-folder'
   | 'export-notes'
@@ -418,6 +429,7 @@ export type AppCommand =
 export interface CodeTutorApi {
   pickProject(): Promise<string | null>;
   openProject(rootPath: string): Promise<ProjectSnapshot>;
+  refreshProject(): Promise<ProjectSnapshot>;
   closeProject(rootPath: string): Promise<ProjectCloseResult>;
   getSnapshot(): Promise<ProjectSnapshot | null>;
   readSource(relativePath: string): Promise<string>;

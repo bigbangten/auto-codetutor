@@ -10,7 +10,7 @@ import { readJson, writeJsonAtomic } from './json-store.js';
 import { ReferenceService, type ReferenceHit } from './reference-service.js';
 
 interface IndexCache {
-  schema: 6;
+  schema: 7;
   mexKey: string;
   parsedFiles: ParsedFile[];
 }
@@ -135,6 +135,12 @@ export class ProjectService {
     this.references.unbind();
   }
 
+  async refresh(): Promise<ProjectSnapshot> {
+    if (!this.rootPath || !this.dataDir) throw new Error('프로젝트를 먼저 여세요.');
+    while (this.indexing) await new Promise<void>((resolve) => this.indexingWaiters.push(resolve));
+    return this.reindex(false);
+  }
+
   snapshot(): ProjectSnapshot | null {
     return this.index?.snapshot(this.files) ?? null;
   }
@@ -232,9 +238,9 @@ export class ProjectService {
       const mexSources = await Promise.all(mexFiles.map(async (file) => ({ path: file.path, source: await this.readSource(file.path) })));
       const mexInventory = parseMexInventory(mexSources);
       const mexKey = hash(mexSources.map((item) => `${item.path}\0${item.source}`).join('\0'));
-      const cacheFile = path.join(this.dataDir, 'index-v6.json');
+      const cacheFile = path.join(this.dataDir, 'index-v7.json');
       const diskCache = force ? null : await readJson<IndexCache | null>(cacheFile, null);
-      const validCache = diskCache?.schema === 6 ? diskCache : null;
+      const validCache = diskCache?.schema === 7 ? diskCache : null;
       const cachedByPath = new Map((validCache?.parsedFiles ?? []).map((entry) => [entry.file.path, entry]));
       const mexUnchanged = validCache?.mexKey === mexKey;
       const aiMetadata = await readJson<{ files?: string[] }>(path.join(this.dataDir, 'ai-authorship.json'), {});
@@ -252,7 +258,7 @@ export class ProjectService {
       }
       this.files = files;
       this.index = new ProjectIndex(this.rootPath, parsedFiles);
-      await writeJsonAtomic(cacheFile, { schema: 6, mexKey, parsedFiles } satisfies IndexCache);
+      await writeJsonAtomic(cacheFile, { schema: 7, mexKey, parsedFiles } satisfies IndexCache);
       const snapshot = this.index.snapshot(files);
       return snapshot;
     } finally {

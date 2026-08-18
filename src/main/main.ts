@@ -31,6 +31,7 @@ function installApplicationMenu(): void {
       label: '파일',
       submenu: [
         { label: '프로젝트 가져오기…', accelerator: 'CommandOrControl+O', click: command('import-project') },
+        { label: '현재 프로젝트 새로고침', accelerator: 'F5', click: command('refresh-active-project') },
         { label: '현재 프로젝트 닫기', accelerator: 'CommandOrControl+W', click: command('close-active-project') },
         { label: '레퍼런스 폴더 지정…', accelerator: 'CommandOrControl+Shift+O', click: command('pick-reference-folder') },
         { label: '학습 노트 내보내기…', click: command('export-notes') },
@@ -81,7 +82,7 @@ function installApplicationMenu(): void {
               type: 'info',
               title: 'Auto CodeTutor 정보',
               message: `Auto CodeTutor ${app.getVersion()}`,
-              detail: 'S32DS C 프로젝트를 구조·실행 흐름·근거 중심으로 학습하는 로컬 데스크톱 도구입니다.\n\n제작자: 김영민\n이메일: bigbangten95@gmail.com\n\nAI는 설치된 Codex 또는 Claude CLI를 사용하며 API 키를 저장하지 않습니다.',
+              detail: '임베디드 C 프로젝트를 구조·실행 흐름·근거 중심으로 학습하는 로컬 데스크톱 도구입니다. S32DS/NXP 프로젝트에는 MEX·RTD 전용 분석을 추가로 제공합니다.\n\n제작자: 김영민\n이메일: bigbangten95@gmail.com\n\nAI는 설치된 Codex 또는 Claude CLI를 사용하며 API 키를 저장하지 않습니다.',
               buttons: ['확인'],
             });
           },
@@ -94,7 +95,7 @@ function installApplicationMenu(): void {
 
 function installIpc(): void {
   ipcMain.handle('project:pick', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'], title: 'S32DS C 프로젝트 폴더 선택' });
+    const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'], title: '임베디드 C 프로젝트 폴더 선택' });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
   ipcMain.handle('project:open', async (_event, rootPath: unknown) => {
@@ -112,6 +113,10 @@ function installIpc(): void {
       activeProject: snapshot.rootPath,
     });
     return snapshot;
+  });
+  ipcMain.handle('project:refresh', async () => {
+    if (!project.root) throw new Error('새로고침할 프로젝트가 없습니다.');
+    return project.refresh();
   });
   ipcMain.handle('project:close', async (_event, rootPath: unknown) => {
     if (typeof rootPath !== 'string' || !rootPath.trim()) throw new Error('닫을 프로젝트 경로가 올바르지 않습니다.');
