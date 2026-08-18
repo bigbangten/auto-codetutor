@@ -615,10 +615,57 @@ function appendReferences(parent: HTMLElement, title: string, references: Symbol
       undefined,
       reference.changeDescription ?? reference.expression,
     );
+    if (reference.valueExpression && reference.expandedValue) {
+      const expansion = document.createElement('span'); expansion.className = 'macro-expansion-detail';
+      const label = document.createElement('span'); label.textContent = '매크로 치환';
+      const original = document.createElement('code'); original.textContent = reference.valueExpression;
+      const arrow = document.createElement('span'); arrow.textContent = '→';
+      const expanded = document.createElement('code'); expanded.textContent = reference.expandedValue;
+      expansion.append(label, original, arrow, expanded);
+      link.append(expansion);
+    }
     if (emphasis) link.classList.add('write-reference');
     area.append(link);
   });
   parent.append(area);
+}
+
+function appendMacroValue(parent: HTMLElement, symbol: SymbolRecord): void {
+  if (symbol.kind !== 'macro') return;
+  const card = document.createElement('div'); card.className = 'macro-value-card';
+  const heading = document.createElement('strong');
+  heading.textContent = symbol.macro?.functionLike ? '매크로 치환식' : '매크로 값';
+  card.append(heading);
+
+  if (!symbol.macro) {
+    const unavailable = document.createElement('p');
+    unavailable.textContent = '정의가 열린 프로젝트 밖에 있어 실제 치환값을 확인할 수 없습니다.';
+    card.append(unavailable); parent.append(card); return;
+  }
+
+  if (symbol.macro.functionLike && symbol.macro.parameters.length) {
+    const parameters = document.createElement('div'); parameters.className = 'macro-value-row';
+    const label = document.createElement('span'); label.textContent = '매개변수';
+    const code = document.createElement('code'); code.textContent = symbol.macro.parameters.join(', ');
+    parameters.append(label, code); card.append(parameters);
+  }
+  const replacement = document.createElement('div'); replacement.className = 'macro-value-row';
+  const replacementLabel = document.createElement('span'); replacementLabel.textContent = symbol.macro.functionLike ? '치환식' : '정의된 값';
+  const replacementCode = document.createElement('code'); replacementCode.textContent = symbol.macro.replacement || '(빈 매크로)';
+  replacement.append(replacementLabel, replacementCode); card.append(replacement);
+
+  const expandedValue = symbol.macro.expandedReplacement;
+  if (!symbol.macro.functionLike && expandedValue && expandedValue !== symbol.macro.replacement) {
+    const expanded = document.createElement('div'); expanded.className = 'macro-value-row resolved';
+    const expandedLabel = document.createElement('span'); expandedLabel.textContent = '최종 해석값';
+    const expandedCode = document.createElement('code'); expandedCode.textContent = expandedValue;
+    expanded.append(expandedLabel, expandedCode); card.append(expanded);
+  }
+  const note = document.createElement('small');
+  note.textContent = symbol.macro.functionLike
+    ? '함수형 매크로는 호출 인자에 따라 최종 코드가 달라집니다.'
+    : '프로젝트 내부 객체형 매크로를 재귀적으로 치환한 결과이며, C 수식 자체를 계산한 값은 아닙니다.';
+  card.append(note); parent.append(card);
 }
 
 function appendOriginEvidence(parent: HTMLElement, symbol: SymbolRecord, sourceRole: OriginPresentation): void {
@@ -649,13 +696,15 @@ function renderSymbol(symbol: SymbolRecord): void {
   header.append(titleRow, title, signature); content.append(header);
 
   const basics = section('정의 및 타입'); const grid = document.createElement('dl'); grid.className = 'info-grid';
-  const rows: Array<[string, string]> = [['분류', kindLabels[symbol.kind]], ['데이터 타입', compactDeclaration(symbol.type)], ['유효 범위', symbol.scope]];
+  const rows: Array<[string, string]> = symbol.kind === 'macro'
+    ? [['분류', kindLabels[symbol.kind]], ['매크로 종류', symbol.macro?.functionLike ? '함수형 매크로' : '객체형 매크로'], ['유효 범위', symbol.scope]]
+    : [['분류', kindLabels[symbol.kind]], ['데이터 타입', compactDeclaration(symbol.type)], ['유효 범위', symbol.scope]];
   if (!symbol.synthetic) {
     const location = symbol.definition ?? symbol.declaration;
     rows.push([symbol.definition ? '정의 위치' : '선언 위치', `${location.file}:${location.startLine}`]);
   }
   for (const [label, value] of rows) { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); dd.textContent = value; grid.append(dt, dd); }
-  basics.append(grid);
+  basics.append(grid); appendMacroValue(basics, symbol);
   if (!symbol.synthetic) basics.append(sourceLink(symbol.definition ?? symbol.declaration, symbol.definition ? '정의로 이동' : '선언으로 이동'));
   if (symbol.resolvedType && !symbol.resolvedType.inferred) {
     const typeLink = sourceLink(symbol.resolvedType.range, `타입 정의로 이동 · ${symbol.resolvedType.name}`);

@@ -239,6 +239,15 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .type-explanation { margin-top: 10px; padding: 9px 10px; border-left: 2px solid #4ec9b0; background: #202827; }
 .type-explanation strong { display: block; margin-bottom: 4px; color: #9cdcfe; font-size: 10px; }
 .type-explanation p { margin: 0; color: #c9d5d2; font-size: 11px; line-height: 1.55; }
+.macro-value-card { display: grid; gap: 7px; margin: 10px 0; padding: 10px; border-left: 3px solid #4ec9b0; background: #1d2927; }
+.macro-value-card > strong { color: #9cdcfe; font-size: 11px; }
+.macro-value-card > p { margin: 0; color: #aaa; font-size: 11px; line-height: 1.5; }
+.macro-value-card > small { color: #8fa5a0; font-size: 9px; line-height: 1.45; }
+.macro-value-row { min-width: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.macro-value-row > span { color: #858585; font-size: 10px; }
+.macro-value-row > code { min-width: 0; overflow-wrap: anywhere; color: #dcdcaa; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; }
+.macro-value-row.resolved { padding-top: 6px; border-top: 1px solid #34514c; }
+.macro-value-row.resolved > code { color: #4ec9b0; }
 .function-contract { display: grid; gap: 12px; }
 .contract-group { display: grid; gap: 7px; padding: 11px; border: 1px solid #343434; border-radius: 3px; background: #202020; }
 .contract-group.input-contract { border-left: 3px solid #3794c6; background: #1d252a; }
@@ -270,6 +279,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .source-link code, .call-link code { min-width: 0; overflow: hidden; color: #dcdcaa; text-overflow: ellipsis; white-space: nowrap; font: 12px "Cascadia Mono", Consolas, monospace; }
 .source-link small, .call-link small { color: #858585; font-size: 10px; }
 .source-link .change-detail, .call-link .change-detail { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: #c8b676; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.4 "Cascadia Mono", Consolas, monospace; }
+.source-link .macro-expansion-detail { grid-column: 1 / -1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; color: #858585; font-size: 9px; }
+.source-link .macro-expansion-detail code { flex: 0 1 auto; color: #4ec9b0; font-size: 10px; }
+.source-link .macro-expansion-detail code:first-of-type { color: #dcdcaa; }
 .call-link code, .call-link small { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .call-list-more { margin-top: 6px; border-top: 1px solid #3a3a3a; }
 .call-list-more > summary { padding: 9px 7px 5px; color: #9cdcfe; cursor: pointer; font-size: 11px; }

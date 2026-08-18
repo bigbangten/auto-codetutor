@@ -62,6 +62,7 @@ Traditional code browsers show symbols. AI chat tools explain snippets. Embedded
 - Read-only integration with locally installed Codex and Claude subscription CLIs
 - No API key entry or storage
 - Lightweight background analysis that batches and reuses explanations for `src` symbols
+- Immediate object-like macro values and recursive macro expansion at variable write sites
 - Clickable explanation paragraphs, lists, and code examples that jump to the nearest verified `[[relative/path.c:line]]` evidence
 - Reference-folder support for datasheets, manuals, notes, and page-level PDF citations
 - Persistent, project-specific chat history and learning notes
@@ -119,7 +120,7 @@ npm run dist
 The current build is generated at:
 
 ```text
-release-0.9.4/Auto-CodeTutor-0.9.4-portable.exe
+release-0.9.5/Auto-CodeTutor-0.9.5-portable.exe
 ```
 
 ## Data, Privacy, and Safety

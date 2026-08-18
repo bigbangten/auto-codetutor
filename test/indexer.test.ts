@@ -111,6 +111,37 @@ test('every src token can resolve external types/functions and function contract
   assert.equal(index.getSymbolAt('src/contracts.c', 2, 13, 'RETRY_LIMIT')?.kind, 'macro');
 });
 
+test('macro values and their resolved assignment values remain visible', async () => {
+  const parser = new CParser(runtime, grammar);
+  const mex = parseMexInventory([]);
+  const source = `#define BASE_PORT 500U
+#define ACTIVE_PORT BASE_PORT
+#define NEXT_PORT (ACTIVE_PORT + 1U)
+static uint16_t port = ACTIVE_PORT;
+void Configure(void) {
+  port = NEXT_PORT;
+}
+`;
+  const file: ProjectFile = { path: 'src/macros.c', kind: 'c', size: source.length };
+  const parsed = await parser.parse(file, source, mex);
+  const index = new ProjectIndex(path.resolve('.'), [parsed]);
+
+  const base = index.symbols.find((symbol) => symbol.name === 'BASE_PORT' && symbol.kind === 'macro');
+  const active = index.symbols.find((symbol) => symbol.name === 'ACTIVE_PORT' && symbol.kind === 'macro');
+  const next = index.symbols.find((symbol) => symbol.name === 'NEXT_PORT' && symbol.kind === 'macro');
+  assert.equal(base?.macro?.replacement, '500U');
+  assert.equal(base?.macro?.expandedReplacement, '500U');
+  assert.equal(active?.macro?.replacement, 'BASE_PORT');
+  assert.equal(active?.macro?.expandedReplacement, '500U');
+  assert.equal(next?.macro?.expandedReplacement, '(500U + 1U)');
+  assert.match(active?.signature ?? '', /^#define ACTIVE_PORT BASE_PORT/);
+
+  const port = index.symbols.find((symbol) => symbol.name === 'port' && symbol.kind === 'variable');
+  const writes = port?.references.filter((reference) => reference.kind === 'write') ?? [];
+  assert.ok(writes.some((reference) => reference.valueExpression === 'ACTIVE_PORT' && reference.expandedValue === '500U'));
+  assert.ok(writes.some((reference) => reference.valueExpression === 'NEXT_PORT' && reference.expandedValue === '(500U + 1U)'));
+});
+
 test('C language qualifiers never become unresolved external variables', async () => {
   const parser = new CParser(runtime, grammar);
   const mex = parseMexInventory([]);

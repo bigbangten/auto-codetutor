@@ -18,6 +18,7 @@ import type {
   SymbolSummary,
 } from '../shared/contracts.js';
 import { isCReservedWord } from '../shared/c-glossary.js';
+import { expandObjectLikeMacros } from '../shared/c-macros.js';
 import { classifyOrigin, type MexInventory } from './origin.js';
 
 interface RawOccurrence {
@@ -29,6 +30,7 @@ interface RawOccurrence {
   target?: string;
   expression?: string;
   changeDescription?: string;
+  valueExpression?: string;
   valueSource?: ReferenceInfo['valueSource'];
 }
 
@@ -149,7 +151,7 @@ function valueDescription(right: SyntaxNode, operator = '='): Pick<RawOccurrence
   return { changeDescription: `${value} 식의 계산 결과 대입`, valueSource: 'expression' };
 }
 
-function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'target' | 'expression' | 'changeDescription' | 'valueSource'> {
+function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'target' | 'expression' | 'changeDescription' | 'valueExpression' | 'valueSource'> {
   let current: SyntaxNode | null = node;
   for (let depth = 0; current?.parent && depth < 6; depth += 1) {
     const parent: SyntaxNode = current.parent;
@@ -170,6 +172,7 @@ function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'target'
           kind: 'write',
           target,
           expression: concise(parent.text),
+          valueExpression: right ? concise(right.text) : undefined,
           ...change,
           changeDescription: `${target}: ${change.changeDescription}`,
         };
@@ -198,6 +201,7 @@ function initializerOccurrence(file: string, name: string, declarator: SyntaxNod
     container,
     target: name,
     expression: concise(`${name} = ${value.text}`),
+    valueExpression: concise(value.text),
     ...description,
     changeDescription: `${name}: ${description.changeDescription}`,
     valueSource: description.valueSource === 'expression' ? 'initializer' : description.valueSource,
@@ -349,6 +353,7 @@ export class CParser {
       fields?: FieldInfo[];
       parentId?: string;
       limitations?: string[];
+      macro?: SymbolRecord['macro'];
     }): SymbolRecord => {
       const declaration = input.declaration ?? rangeOf(file.path, input.nameNode);
       const symbol: SymbolRecord = {
@@ -364,6 +369,7 @@ export class CParser {
         parameters: [],
         returnExpressions: [],
         fields: input.fields ?? [],
+        macro: input.macro,
         origin,
         references: [{ kind: input.definition ? 'definition' : 'declaration', range: input.definition ?? declaration, container: input.scope || undefined }],
         calls: [],
@@ -523,7 +529,24 @@ export class CParser {
 
     for (const node of descendants(root, ['preproc_def', 'preproc_function_def'])) {
       const nameNode = node.childForFieldName('name') ?? node.namedChildren.find((child) => child.type === 'identifier');
-      if (nameNode) addSymbol({ nameNode, kind: 'macro', type: node.type === 'preproc_function_def' ? '함수형 매크로' : '매크로', scope: 'global', definition: rangeOf(file.path, node) });
+      if (!nameNode) continue;
+      const functionLike = node.type === 'preproc_function_def';
+      const parametersNode = node.childForFieldName('parameters');
+      const valueNode = node.childForFieldName('value')
+        ?? node.namedChildren.find((child) => child.type === 'preproc_arg');
+      addSymbol({
+        nameNode,
+        kind: 'macro',
+        type: functionLike ? '함수형 매크로' : '객체형 매크로',
+        scope: 'global',
+        definition: rangeOf(file.path, node),
+        signature: concise(node.text),
+        macro: {
+          functionLike,
+          parameters: parametersNode?.descendantsOfType('identifier').map((parameter) => parameter.text) ?? [],
+          replacement: valueNode?.text.trim() ?? '',
+        },
+      });
     }
 
     for (const node of descendants(root, ['identifier', 'field_identifier'])) {
@@ -557,6 +580,29 @@ function chooseCandidate(candidates: SymbolRecord[], occurrence: RawOccurrence):
       - (symbol.kind === 'field' && occurrence.kind !== 'read' && occurrence.kind !== 'write' ? 5 : 0);
     return score(b) - score(a);
   })[0];
+}
+
+function macroDefinitionAt(
+  name: string,
+  range: SourceRange,
+  byName: Map<string, SymbolRecord[]>,
+): SymbolRecord | undefined {
+  const candidates = (byName.get(name) ?? [])
+    .filter((symbol) => symbol.kind === 'macro' && symbol.macro && !symbol.macro.functionLike);
+  if (!candidates.length) return undefined;
+  const local = candidates.filter((symbol) => symbol.declaration.file === range.file);
+  const preceding = local
+    .filter((symbol) => symbol.declaration.startLine <= range.startLine)
+    .sort((left, right) => right.declaration.startLine - left.declaration.startLine);
+  return preceding[0] ?? local[0] ?? candidates[0];
+}
+
+function expandMacrosAt(
+  expression: string,
+  range: SourceRange,
+  byName: Map<string, SymbolRecord[]>,
+): string {
+  return expandObjectLikeMacros(expression, (name) => macroDefinitionAt(name, range, byName)?.macro?.replacement);
 }
 
 const AGGREGATE_KINDS = new Set<SymbolKind>(['typedef', 'struct', 'union', 'enum']);
@@ -628,6 +674,7 @@ export class ProjectIndex {
     for (const file of parsedFiles) {
       for (const symbol of file.symbols) {
         symbol.resolvedType = undefined;
+        if (symbol.macro) symbol.macro.expandedReplacement = undefined;
         symbol.references = [{
           kind: symbol.definition ? 'definition' : 'declaration',
           range: symbol.definition ?? symbol.declaration,
@@ -680,6 +727,15 @@ export class ProjectIndex {
       const names = this.byName.get(symbol.name) ?? [];
       names.push(symbol);
       this.byName.set(symbol.name, names);
+    }
+
+    for (const symbol of this.symbols) {
+      if (symbol.kind !== 'macro' || !symbol.macro || symbol.macro.functionLike) continue;
+      symbol.macro.expandedReplacement = concise(expandMacrosAt(
+        symbol.macro.replacement,
+        symbol.definition ?? symbol.declaration,
+        this.byName,
+      ));
     }
 
     // Types supplied by the compiler, libc, lwIP, or an SDK header outside the opened
@@ -868,15 +924,21 @@ export class ProjectIndex {
             ? allCandidates.filter((candidate) => candidate.kind === 'function' || candidate.kind === 'macro')
             : allCandidates.filter((candidate) => !AGGREGATE_KINDS.has(candidate.kind));
         const target = chooseCandidate(compatible.length ? compatible : allCandidates, occurrence);
-        if (target) target.references.push({
-          kind: occurrence.kind,
-          range: occurrence.range,
-          container: occurrence.container,
-          target: occurrence.target,
-          expression: occurrence.expression,
-          changeDescription: occurrence.changeDescription,
-          valueSource: occurrence.valueSource,
-        });
+        if (target) {
+          const valueExpression = occurrence.valueExpression ? concise(occurrence.valueExpression) : undefined;
+          const expanded = valueExpression ? concise(expandMacrosAt(valueExpression, occurrence.range, this.byName)) : undefined;
+          target.references.push({
+            kind: occurrence.kind,
+            range: occurrence.range,
+            container: occurrence.container,
+            target: occurrence.target,
+            expression: occurrence.expression,
+            changeDescription: occurrence.changeDescription,
+            valueExpression,
+            expandedValue: expanded && expanded !== valueExpression ? expanded : undefined,
+            valueSource: occurrence.valueSource,
+          });
+        }
       }
       for (const call of file.calls) {
         const caller = this.byId.get(call.callerId);

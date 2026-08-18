@@ -97,7 +97,20 @@ export interface ReferenceInfo {
   target?: string;
   expression?: string;
   changeDescription?: string;
+  /** Right-hand expression before preprocessing, for example ACTIVE_PORT. */
+  valueExpression?: string;
+  /** Object-like macros recursively expanded at the use site, for example 500U. */
+  expandedValue?: string;
   valueSource?: 'constant' | 'variable' | 'call' | 'expression' | 'increment' | 'decrement' | 'initializer';
+}
+
+export interface MacroInfo {
+  functionLike: boolean;
+  parameters: string[];
+  /** Replacement text written after the macro name/parameter list. */
+  replacement: string;
+  /** Object-like project macros recursively expanded without evaluating the C expression. */
+  expandedReplacement?: string;
 }
 
 export interface CallInfo {
@@ -121,6 +134,7 @@ export interface SymbolRecord {
   parameters: FunctionParameterInfo[];
   returnExpressions: string[];
   fields: FieldInfo[];
+  macro?: MacroInfo;
   resolvedType?: {
     symbolId: string;
     name: string;

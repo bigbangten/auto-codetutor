@@ -261,6 +261,12 @@ focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘
     kind: symbol.kind,
     type: clip(symbol.type, 500),
     signature: symbol.signature ? clip(symbol.signature, 700) : undefined,
+    macro: symbol.macro ? {
+      functionLike: symbol.macro.functionLike,
+      parameters: symbol.macro.parameters,
+      replacement: clip(symbol.macro.replacement, 700),
+      expandedReplacement: symbol.macro.expandedReplacement ? clip(symbol.macro.expandedReplacement, 700) : undefined,
+    } : undefined,
     scope: symbol.scope,
     definition: anchor(symbol.definition ?? symbol.declaration),
     callers: symbol.callers.slice(0, 10).map((call) => call.name),
@@ -268,7 +274,12 @@ focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘
     calls: symbol.calls.slice(0, 12).map((call) => call.name),
     parameters: symbol.parameters.map((parameter) => ({ name: parameter.name, type: parameter.type, anchor: anchor(parameter.range) })),
     returnExpressions: symbol.returnExpressions,
-    writes: symbol.references.filter((reference) => reference.kind === 'write').slice(0, 12).map((reference) => reference.changeDescription ?? reference.expression ?? anchor(reference.range)),
+    writes: symbol.references.filter((reference) => reference.kind === 'write').slice(0, 12).map((reference) => {
+      const base = reference.changeDescription ?? reference.expression ?? anchor(reference.range);
+      return reference.valueExpression && reference.expandedValue
+        ? `${base} (매크로 치환: ${reference.valueExpression} → ${reference.expandedValue})`
+        : base;
+    }),
     fields: flattenFields(fieldsFor(symbol)),
   }));
   return `당신은 임베디드 C/S32DS 프로젝트를 공부하는 사용자를 위한 한국어 코드 분석가입니다.
