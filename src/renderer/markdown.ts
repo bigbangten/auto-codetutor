@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import type { AnchorValidation, SourceRange } from '../shared/contracts.js';
+import { nearestGroundedBlock } from '../shared/grounding.js';
 
 const ANCHOR_RE = /\[\[[^\[\]\r\n]+:(?:\d+(?:-\d+)?|p\.\d+)\]\]/g;
 
@@ -54,11 +55,44 @@ export async function renderGroundedMarkdown(
     fragment.append(document.createTextNode(value.slice(cursor)));
     node.parentNode.replaceChild(fragment, node);
   }
-  for (const paragraph of container.querySelectorAll('p')) {
-    const first = paragraph.querySelector<HTMLButtonElement>('.code-anchor.valid, .document-anchor.valid');
-    if (!first) continue;
-    paragraph.classList.add('grounded');
-    paragraph.title = '이 설명의 첫 번째 코드 근거로 이동';
-    paragraph.addEventListener('click', (event) => { if (!(event.target as HTMLElement).closest('.code-anchor')) first.click(); });
-  }
+  const blocks = [...container.querySelectorAll<HTMLElement>(
+    ':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > p, :scope > pre, :scope > blockquote, :scope > ul > li, :scope > ol > li, :scope > table',
+  )];
+  let section = 0;
+  const sectionByIndex = blocks.map((block) => {
+    if (/^H[1-4]$/.test(block.tagName)) section += 1;
+    return section;
+  });
+  const directGrounding = new Map<number, HTMLButtonElement>();
+  blocks.forEach((block, index) => {
+    const first = block.querySelector<HTMLButtonElement>('.code-anchor.valid, .document-anchor.valid');
+    if (first) directGrounding.set(index, first);
+  });
+  const groundedIndices = [...directGrounding.keys()];
+
+  blocks.forEach((block, index) => {
+    const groundedIndex = nearestGroundedBlock(index, groundedIndices, sectionByIndex);
+    if (groundedIndex === undefined) return;
+    const anchorButton = directGrounding.get(groundedIndex);
+    if (!anchorButton) return;
+    const direct = groundedIndex === index;
+    const activate = () => anchorButton.click();
+    block.classList.add('grounded');
+    block.dataset.grounding = direct ? 'direct' : 'nearby';
+    block.title = direct ? '이 설명의 코드 근거로 이동' : '이 설명과 가장 가까운 코드 근거로 이동';
+    block.tabIndex = 0;
+    block.setAttribute('role', 'link');
+    block.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('button, a, input, select, textarea, summary, .code-anchor, .document-anchor')) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim()) return;
+      activate();
+    });
+    block.addEventListener('keydown', (event) => {
+      if (event.target !== block || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      activate();
+    });
+  });
 }
