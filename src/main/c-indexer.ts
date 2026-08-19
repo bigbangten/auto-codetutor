@@ -33,6 +33,9 @@ interface RawOccurrence {
   changeDescription?: string;
   valueExpression?: string;
   valueSource?: ReferenceInfo['valueSource'];
+  /** Root object and member path used to disambiguate same-named fields. */
+  memberOwner?: string;
+  memberPath?: string[];
 }
 
 interface RawCall {
@@ -152,7 +155,59 @@ function valueDescription(right: SyntaxNode, operator = '='): Pick<RawOccurrence
   return { changeDescription: `${value} 식의 계산 결과 대입`, valueSource: 'expression' };
 }
 
-function occurrenceKind(node: SyntaxNode): Pick<RawOccurrence, 'kind' | 'target' | 'expression' | 'changeDescription' | 'valueExpression' | 'valueSource'> {
+function designatedInitializerWrite(node: SyntaxNode): Pick<
+  RawOccurrence,
+  'kind' | 'target' | 'expression' | 'changeDescription' | 'valueExpression' | 'valueSource' | 'memberOwner' | 'memberPath'
+> | null {
+  if (node.type !== 'field_identifier' || node.parent?.type !== 'field_designator') return null;
+  const pairs: SyntaxNode[] = [];
+  let nearestPair: SyntaxNode | null = null;
+  let owner: string | undefined;
+  let current: SyntaxNode | null = node;
+  for (let depth = 0; current?.parent && depth < 16; depth += 1) {
+    const parent: SyntaxNode = current.parent;
+    if (parent.type === 'initializer_pair') {
+      nearestPair ??= parent;
+      pairs.unshift(parent);
+    }
+    if (parent.type === 'init_declarator') {
+      owner = declaratorIdentifier(parent.childForFieldName('declarator'))?.text;
+      break;
+    }
+    current = parent;
+  }
+  if (!nearestPair) return null;
+  const value = nearestPair.childForFieldName('value')
+    ?? nearestPair.namedChildren.find((child) => child.type !== 'field_designator');
+  if (!value) return null;
+  const memberPath = pairs.flatMap((pair) => {
+    const designator = pair.childForFieldName('designator')
+      ?? pair.namedChildren.find((child) => child.type === 'field_designator');
+    return designator?.descendantsOfType('field_identifier').map((field) => field.text) ?? [];
+  });
+  if (!memberPath.length) return null;
+  const target = [...(owner ? [owner] : []), ...memberPath].join('.');
+  const description = value.type === 'initializer_list'
+    ? { changeDescription: '하위 필드 묶음 초기화', valueSource: 'initializer' as const }
+    : valueDescription(value);
+  return {
+    kind: 'write',
+    target,
+    expression: concise(`${target} = ${value.text}`),
+    valueExpression: concise(value.text),
+    ...description,
+    changeDescription: `${target}: ${description.changeDescription}`,
+    memberOwner: owner,
+    memberPath,
+  };
+}
+
+function occurrenceKind(node: SyntaxNode): Pick<
+  RawOccurrence,
+  'kind' | 'target' | 'expression' | 'changeDescription' | 'valueExpression' | 'valueSource' | 'memberOwner' | 'memberPath'
+> {
+  const initializerWrite = designatedInitializerWrite(node);
+  if (initializerWrite) return initializerWrite;
   let current: SyntaxNode | null = node;
   for (let depth = 0; current?.parent && depth < 6; depth += 1) {
     const parent: SyntaxNode = current.parent;
@@ -314,6 +369,13 @@ function memberAccessOf(file: string, node: SyntaxNode, container?: string): Raw
   return parent ? { ...parent, path: [...parent.path, field.text], range: rangeOf(file, field) } : null;
 }
 
+function memberAccessForIdentifier(file: string, node: SyntaxNode, container?: string): RawMemberAccess | null {
+  if (node.type !== 'field_identifier' || node.parent?.type !== 'field_expression') return null;
+  const field = node.parent.childForFieldName('field');
+  if (!field || field.id !== node.id) return null;
+  return memberAccessOf(file, node.parent, container);
+}
+
 function mergeInferredField(fields: FieldInfo[], access: RawMemberAccess, depth = 0): void {
   const name = access.path[depth];
   if (!name) return;
@@ -402,6 +464,38 @@ export class CParser {
       symbols.push(symbol);
       definitions.add(`${input.nameNode.startIndex}:${input.nameNode.endIndex}`);
       return symbol;
+    };
+
+    const addFieldSymbols = (
+      owner: SymbolRecord,
+      fields: FieldInfo[],
+      specifier: SyntaxNode,
+      scope = owner.name,
+      parentId = owner.id,
+    ): void => {
+      const fieldNodes = specifier.descendantsOfType(['field_identifier', 'identifier']);
+      for (const field of fields) {
+        const nameNode = fieldNodes.find((candidate) =>
+          candidate.text === field.name
+          && candidate.startPosition.row + 1 === field.range.startLine
+          && candidate.startPosition.column + 1 === field.range.startColumn);
+        if (!nameNode) {
+          if (field.children.length) addFieldSymbols(owner, field.children, specifier, scope, parentId);
+          continue;
+        }
+        const fieldSymbol = addSymbol({
+          nameNode,
+          kind: 'field',
+          type: field.type,
+          scope,
+          parentId,
+          fields: field.children,
+        });
+        field.symbolId = fieldSymbol.id;
+        if (field.children.length) {
+          addFieldSymbols(owner, field.children, specifier, `${scope}.${field.name}`, fieldSymbol.id);
+        }
+      }
     };
 
     // Functions and their parameters/local variables are indexed first so every occurrence can
@@ -499,10 +593,7 @@ export class CParser {
         definition: rangeOf(file.path, node),
         fields,
       });
-      for (const field of fields) {
-        const syntheticNode = node.descendantsOfType('field_identifier').find((candidate) => candidate.text === field.name);
-        if (syntheticNode) addSymbol({ nameNode: syntheticNode, kind: 'field', type: field.type, scope: typeSymbol.name, parentId: typeSymbol.id });
-      }
+      addFieldSymbols(typeSymbol, fields, node);
     }
 
     for (const node of descendants(root, 'type_definition')) {
@@ -512,15 +603,23 @@ export class CParser {
       const typeNode = node.childForFieldName('type');
       const aggregateKind = typeNode?.type.match(/^(struct|union|enum)_specifier$/)?.[1];
       const aggregateName = typeNode?.childForFieldName('name')?.text;
-      addSymbol({
+      const namedAggregate = aggregateKind && aggregateName
+        ? symbols.find((candidate) => candidate.kind === aggregateKind && candidate.name === aggregateName)
+        : undefined;
+      const fields = namedAggregate?.fields
+        ?? (typeNode?.type === 'enum_specifier'
+          ? enumChildren(file.path, typeNode)
+          : typeNode && ['struct_specifier', 'union_specifier'].includes(typeNode.type) ? fieldChildren(file.path, typeNode) : []);
+      const alias = addSymbol({
         nameNode,
         kind: 'typedef',
         type: aggregateKind ? `${aggregateKind}${aggregateName ? ` ${aggregateName}` : ' (anonymous)'}` : typeNode?.text.replace(/\s+/g, ' ').trim() || 'typedef',
         scope: 'global',
-        fields: typeNode?.type === 'enum_specifier'
-          ? enumChildren(file.path, typeNode)
-          : typeNode && ['struct_specifier', 'union_specifier'].includes(typeNode.type) ? fieldChildren(file.path, typeNode) : [],
+        fields,
       });
+      if (!namedAggregate && typeNode && ['struct_specifier', 'union_specifier', 'enum_specifier'].includes(typeNode.type)) {
+        addFieldSymbols(alias, fields, typeNode);
+      }
     }
 
     // Top-level prototypes and global variables.
@@ -576,7 +675,16 @@ export class CParser {
     for (const node of descendants(root, ['identifier', 'field_identifier'])) {
       if (isDefinitionNode(node, definitions)) continue;
       const container = enclosingFunction(functions, node)?.name;
-      occurrences.push({ name: node.text, ...occurrenceKind(node), range: rangeOf(file.path, node), container });
+      const occurrence: RawOccurrence = { name: node.text, ...occurrenceKind(node), range: rangeOf(file.path, node), container };
+      if (!occurrence.memberPath) {
+        const access = memberAccessForIdentifier(file.path, node, container);
+        if (access) {
+          occurrence.memberOwner = access.owner;
+          occurrence.memberPath = access.path;
+          occurrence.target ??= [access.owner, ...access.path].join('.');
+        }
+      }
+      occurrences.push(occurrence);
     }
     for (const node of descendants(root, 'field_expression')) {
       const access = memberAccessOf(file.path, node, enclosingFunction(functions, node)?.name);
@@ -720,11 +828,58 @@ function resolveTypeRecord(symbol: SymbolRecord, byName: Map<string, SymbolRecor
   return null;
 }
 
+function resolveFieldTypeRecord(type: string, byName: Map<string, SymbolRecord[]>): SymbolRecord | null {
+  const visited = new Set<string>();
+  const queue = typeNames(type);
+  while (queue.length) {
+    const name = queue.shift()!;
+    for (const candidate of byName.get(name) ?? []) {
+      if (visited.has(candidate.id) || !AGGREGATE_KINDS.has(candidate.kind)) continue;
+      visited.add(candidate.id);
+      if (candidate.fields.length || candidate.kind !== 'typedef') return candidate;
+      queue.unshift(...typeNames(candidate.type));
+    }
+  }
+  return null;
+}
+
+function expandedFieldTree(
+  fields: FieldInfo[],
+  byName: Map<string, SymbolRecord[]>,
+  visitedTypes: Set<string> = new Set(),
+  depth = 0,
+): FieldInfo[] {
+  return fields.map((field) => {
+    let children = expandedFieldTree(field.children, byName, visitedTypes, depth + 1);
+    if (!children.length && depth < 5 && !field.type.includes('*')) {
+      const type = resolveFieldTypeRecord(field.type, byName);
+      if (type && !visitedTypes.has(type.id)) {
+        const nextVisited = new Set(visitedTypes);
+        nextVisited.add(type.id);
+        children = expandedFieldTree(type.fields, byName, nextVisited, depth + 1);
+      }
+    }
+    return { ...field, children };
+  });
+}
+
+function fieldAtPath(fields: FieldInfo[], memberPath: string[]): FieldInfo | undefined {
+  let currentFields = fields;
+  let current: FieldInfo | undefined;
+  for (const name of memberPath) {
+    current = currentFields.find((field) => field.name === name);
+    if (!current) return undefined;
+    currentFields = current.children;
+  }
+  return current;
+}
+
 export class ProjectIndex {
   readonly symbols: SymbolRecord[];
   readonly byId = new Map<string, SymbolRecord>();
   readonly byName = new Map<string, SymbolRecord[]>();
   private readonly filesByPath = new Map<string, ParsedFile>();
+  private readonly expandedTypeFields = new Map<string, FieldInfo[]>();
 
   constructor(readonly rootPath: string, readonly parsedFiles: ParsedFile[]) {
     // references/calls/callers are project-wide derived data. Cached ParsedFile objects may
@@ -733,6 +888,7 @@ export class ProjectIndex {
     for (const file of parsedFiles) {
       for (const symbol of file.symbols) {
         symbol.resolvedType = undefined;
+        symbol.containingType = undefined;
         clearCalculatedFieldValues(symbol.fields);
         if (symbol.macro) {
           symbol.macro.expandedReplacement = undefined;
@@ -954,7 +1110,7 @@ export class ProjectIndex {
         name: resolved.name,
         kind: resolved.kind as 'typedef' | 'struct' | 'union' | 'enum',
         range: resolved.definition ?? resolved.declaration,
-        fields: resolved.fields,
+        fields: this.fieldsForType(resolved),
         inferred: resolved.synthetic === 'external-type',
       };
     }
@@ -977,12 +1133,25 @@ export class ProjectIndex {
           const type = this.byId.get(owner.resolvedType.symbolId);
           const fields = type?.fields ?? owner.resolvedType.fields;
           mergeInferredField(fields, access);
+          if (type) this.expandedTypeFields.delete(type.id);
           owner.resolvedType.fields = fields;
         } else {
           mergeInferredField(owner.fields, access);
         }
       }
     }
+    const fieldTargetForOccurrence = (occurrence: RawOccurrence): SymbolRecord | undefined => {
+      if (!occurrence.memberOwner || !occurrence.memberPath?.length) return undefined;
+      const owner = chooseCandidate(
+        (this.byName.get(occurrence.memberOwner) ?? []).filter((candidate) => ['variable', 'parameter', 'field'].includes(candidate.kind)),
+        { ...occurrence, name: occurrence.memberOwner, kind: 'read' },
+      );
+      const fields = owner?.resolvedType?.fields
+        ?? (owner ? resolveTypeRecord(owner, this.byName)?.fields : undefined)
+        ?? owner?.fields;
+      const field = fields ? fieldAtPath(fields, occurrence.memberPath) : undefined;
+      return field?.symbolId ? this.byId.get(field.symbolId) : undefined;
+    };
     for (const file of parsedFiles) {
       for (const occurrence of file.occurrences) {
         const allCandidates = this.byName.get(occurrence.name) ?? [];
@@ -991,7 +1160,8 @@ export class ProjectIndex {
           : occurrence.kind === 'call'
             ? allCandidates.filter((candidate) => candidate.kind === 'function' || candidate.kind === 'macro')
             : allCandidates.filter((candidate) => !AGGREGATE_KINDS.has(candidate.kind));
-        const target = chooseCandidate(compatible.length ? compatible : allCandidates, occurrence);
+        const target = fieldTargetForOccurrence(occurrence)
+          ?? chooseCandidate(compatible.length ? compatible : allCandidates, occurrence);
         if (target) {
           const valueExpression = occurrence.valueExpression ? concise(occurrence.valueExpression) : undefined;
           const expanded = valueExpression ? concise(expandMacrosAt(valueExpression, occurrence.range, this.byName)) : undefined;
@@ -1030,14 +1200,89 @@ export class ProjectIndex {
     }
   }
 
+  private fieldsForType(symbol: SymbolRecord): FieldInfo[] {
+    const cached = this.expandedTypeFields.get(symbol.id);
+    if (cached) return cached;
+    const fields = expandedFieldTree(symbol.fields, this.byName, new Set([symbol.id]));
+    this.expandedTypeFields.set(symbol.id, fields);
+    return fields;
+  }
+
+  private presentSymbol(symbol: SymbolRecord): SymbolRecord {
+    let fields = symbol.fields;
+    if (AGGREGATE_KINDS.has(symbol.kind) && symbol.fields.length) fields = this.fieldsForType(symbol);
+    let containingType = symbol.containingType;
+    if (symbol.kind === 'field' && !containingType) {
+      const memberPath = [symbol.name];
+      let parent = symbol.parentId ? this.byId.get(symbol.parentId) : undefined;
+      while (parent?.kind === 'field') {
+        memberPath.unshift(parent.name);
+        parent = parent.parentId ? this.byId.get(parent.parentId) : undefined;
+      }
+      if (parent && AGGREGATE_KINDS.has(parent.kind)) {
+        containingType = {
+          symbolId: parent.id,
+          name: parent.name,
+          range: parent.definition ?? parent.declaration,
+          fields: this.fieldsForType(parent),
+          path: memberPath,
+        };
+      }
+    }
+    return fields !== symbol.fields || containingType !== symbol.containingType
+      ? { ...symbol, fields, containingType }
+      : symbol;
+  }
+
   getSymbol(id: string): SymbolRecord | null {
-    return this.byId.get(id) ?? null;
+    const symbol = this.byId.get(id);
+    return symbol ? this.presentSymbol(symbol) : null;
+  }
+
+  private contextualizeField(symbol: SymbolRecord, file: string, line: number, column: number): SymbolRecord {
+    if (symbol.kind !== 'field') return symbol;
+    const reference = symbol.references.find((item) =>
+      item.range.file === file && contains(item.range, line, column) && Boolean(item.target));
+    const match = reference?.target?.match(/^([A-Za-z_]\w*)((?:\.[A-Za-z_]\w*)+)$/);
+    if (!reference || !match) return symbol;
+    const ownerName = match[1]!;
+    const memberPath = match[2]!.slice(1).split('.');
+    const owner = chooseCandidate(
+      (this.byName.get(ownerName) ?? []).filter((candidate) => ['variable', 'parameter', 'field'].includes(candidate.kind)),
+      { name: ownerName, kind: 'read', range: reference.range, container: reference.container },
+    );
+    if (!owner) return symbol;
+    const resolved = owner.resolvedType
+      ?? (() => {
+        const type = resolveTypeRecord(owner, this.byName);
+        return type ? {
+          symbolId: type.id,
+          name: type.name,
+          kind: type.kind as 'typedef' | 'struct' | 'union' | 'enum',
+          range: type.definition ?? type.declaration,
+          fields: type.fields,
+        } : undefined;
+      })();
+    if (!resolved) return symbol;
+    const selectedField = fieldAtPath(resolved.fields, memberPath);
+    if (selectedField?.symbolId && selectedField.symbolId !== symbol.id) return symbol;
+    return {
+      ...symbol,
+      containingType: {
+        symbolId: resolved.symbolId,
+        name: resolved.name,
+        range: resolved.range,
+        fields: resolved.fields,
+        path: memberPath,
+        owner: owner.name,
+      },
+    };
   }
 
   getSymbolAt(file: string, line: number, column: number, word: string): SymbolRecord | null {
     const candidates = this.byName.get(word) ?? [];
     const containingFunction = this.symbols.find((symbol) => symbol.kind === 'function' && symbol.definition?.file === file && contains(symbol.definition, line, column));
-    return [...candidates].sort((a, b) => {
+    const selected = [...candidates].sort((a, b) => {
       const score = (symbol: SymbolRecord): number => {
         let value = 0;
         if (symbol.definition?.file === file && contains(symbol.definition, line, column)) value += symbol.name === word ? 90 : 5;
@@ -1049,7 +1294,8 @@ export class ProjectIndex {
         return value;
       };
       return score(b) - score(a);
-    })[0] ?? null;
+    })[0];
+    return selected ? this.presentSymbol(this.contextualizeField(selected, file, line, column)) : null;
   }
 
   graph(input: { rootId?: string; query?: string; limit?: number } = {}): CallGraph {

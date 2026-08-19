@@ -444,11 +444,17 @@ function sourceLink(range: SourceRange, label: string, meta?: string, detail?: s
   button.addEventListener('click', () => void navigate(range)); return button;
 }
 
-function renderFields(fields: FieldInfo[], descriptions: Record<string, string> = {}, prefix = ''): HTMLUListElement {
+function renderFields(
+  fields: FieldInfo[],
+  descriptions: Record<string, string> = {},
+  prefix = '',
+  selectedPath = '',
+): HTMLUListElement {
   const list = document.createElement('ul'); list.className = 'field-tree';
   for (const field of fields) {
     const fieldPath = prefix ? `${prefix}.${field.name}` : field.name;
     const item = document.createElement('li'); const descriptor = document.createElement('span'); descriptor.className = 'field-descriptor';
+    if (selectedPath && fieldPath === selectedPath) item.classList.add('selected-field');
     const code = document.createElement('code'); code.textContent = field.type;
     const name = document.createElement('span'); name.className = 'field-name'; name.textContent = field.name;
     descriptor.append(code, document.createTextNode(' '), name);
@@ -485,7 +491,7 @@ function renderFields(fields: FieldInfo[], descriptions: Record<string, string> 
               : '사전 분석 후 이 필드의 프로젝트 내 의미가 표시됩니다.';
       item.append(pending);
     }
-    if (field.children.length) item.append(renderFields(field.children, descriptions, fieldPath)); list.append(item);
+    if (field.children.length) item.append(renderFields(field.children, descriptions, fieldPath, selectedPath)); list.append(item);
   }
   return list;
 }
@@ -771,6 +777,18 @@ function renderSymbol(symbol: SymbolRecord): void {
       : `${inferredType ? '코드에서 확인된 데이터 타입 구성' : '데이터 타입 구성'} · ${symbol.resolvedType!.name}`;
     const descriptions = state.symbolInsights.get(symbol.id)?.fieldDescriptions ?? {};
     const fields = section(label); fields.append(renderFields(visibleFields, descriptions)); content.append(fields);
+  }
+
+  if (symbol.kind === 'field' && symbol.containingType?.fields.length) {
+    const context = symbol.containingType;
+    const ownerLabel = context.owner ? `${context.owner} : ${context.name}` : context.name;
+    const fields = section(`소속 데이터 구조 · ${ownerLabel}`);
+    const selected = document.createElement('p'); selected.className = 'field-context-path';
+    selected.textContent = `현재 선택 · ${context.path.join('.')}`;
+    fields.append(selected);
+    const descriptions = state.symbolInsights.get(context.symbolId)?.fieldDescriptions ?? {};
+    fields.append(renderFields(context.fields, descriptions, '', context.path.join('.')));
+    content.append(fields);
   }
 
   if (symbol.kind === 'function') {

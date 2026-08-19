@@ -294,6 +294,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--focus); outline:
 .call-list-more > summary { padding: 9px 7px 5px; color: #9cdcfe; cursor: pointer; font-size: 11px; }
 .field-tree { display: grid; gap: 3px; margin: 0; padding: 0; color: #d4d4d4; list-style: none; }
 .field-tree li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 6px 7px; border-left: 2px solid #3c3c3c; background: #252526; }
+.field-tree li.selected-field { border-left-color: #4fc1ff; background: #1d3442; box-shadow: inset 0 0 0 1px #264f78; }
+.field-context-path { margin: 0 0 7px; color: #9cdcfe; font: 11px/1.5 "Cascadia Mono", Consolas, monospace; }
 .field-tree li > .field-descriptor { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.4 "Cascadia Mono", Consolas, monospace; }
 .field-tree code { color: #4ec9b0; }
 .field-tree .field-name { color: #9cdcfe; }

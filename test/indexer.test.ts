@@ -57,6 +57,58 @@ test('C index resolves functions, callers, variables, typedef and union fields',
   assert.ok(writes.some((reference) => reference.changeDescription?.includes('반환값')));
 });
 
+test('nested designated initializers resolve to field writes and retain the containing structure', async () => {
+  const parser = new CParser(runtime, grammar);
+  const mex = parseMexInventory([]);
+  const source = `typedef struct
+{
+  uint32_t settleDelayMs;
+  uint32_t retryDeadlineMs;
+} RecoveryConfig_t;
+typedef struct
+{
+  RecoveryConfig_t recovery;
+} DeviceConfig_t;
+const DeviceConfig_t s_deviceConfig =
+{
+  .recovery =
+  {
+    .settleDelayMs = 2500U,
+    .retryDeadlineMs = 9000U
+  }
+};
+`;
+  const file: ProjectFile = { path: 'src/user-config.c', kind: 'c', size: source.length };
+  const parsed = await parser.parse(file, source, mex);
+  const index = new ProjectIndex(path.resolve('.'), [parsed]);
+
+  const config = index.symbols.find((symbol) => symbol.name === 's_deviceConfig' && symbol.kind === 'variable');
+  const recovery = config?.resolvedType?.fields.find((field) => field.name === 'recovery');
+  assert.deepEqual(recovery?.children.map((field) => field.name), ['settleDelayMs', 'retryDeadlineMs']);
+
+  const indexedField = index.symbols.find((symbol) => symbol.name === 'settleDelayMs' && symbol.kind === 'field');
+  assert.ok(indexedField);
+  const declaredField = index.getSymbol(indexedField.id);
+  assert.equal(declaredField?.synthetic, undefined);
+  assert.equal(declaredField?.type, 'uint32_t');
+  assert.equal(declaredField?.containingType?.name, 'RecoveryConfig_t');
+  assert.deepEqual(declaredField?.containingType?.path, ['settleDelayMs']);
+
+  const selected = index.getSymbolAt('src/user-config.c', 14, 7, 'settleDelayMs');
+  assert.equal(selected?.id, declaredField?.id);
+  assert.equal(selected?.containingType?.name, 'DeviceConfig_t');
+  assert.equal(selected?.containingType?.owner, 's_deviceConfig');
+  assert.deepEqual(selected?.containingType?.path, ['recovery', 'settleDelayMs']);
+
+  const writes = selected?.references.filter((reference) => reference.kind === 'write') ?? [];
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.target, 's_deviceConfig.recovery.settleDelayMs');
+  assert.equal(writes[0]?.valueExpression, '2500U');
+  assert.equal(writes[0]?.calculatedValue, '2500 (10진수)');
+  assert.match(writes[0]?.changeDescription ?? '', /고정 값 2500U 대입/);
+  assert.equal(selected?.references.some((reference) => reference.kind === 'read' && reference.range.startLine === 14), false);
+});
+
 test('call graph ignores same-named variables and limits huge projects to meaningful roots', async () => {
   const parser = new CParser(runtime, grammar);
   const mex = parseMexInventory([]);

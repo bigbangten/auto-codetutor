@@ -32,6 +32,8 @@ export interface FieldInfo {
   type: string;
   range: SourceRange;
   children: FieldInfo[];
+  /** Indexed symbol for this declared member, when its declaration is available. */
+  symbolId?: string;
   /** Explicit enum initializer, for example 1U << 3. */
   valueExpression?: string;
   /** Macro/earlier-enumerator expanded expression when it differs from the source. */
@@ -153,6 +155,17 @@ export interface SymbolRecord {
     fields: FieldInfo[];
     /** The type itself is outside the opened project and the range is a use-site fallback. */
     inferred?: boolean;
+  };
+  /** Aggregate context shown when inspecting a member rather than the whole object. */
+  containingType?: {
+    symbolId: string;
+    name: string;
+    range: SourceRange;
+    fields: FieldInfo[];
+    /** Member path from the aggregate root to the selected field. */
+    path: string[];
+    /** Use-site object or parameter that supplied this context. */
+    owner?: string;
   };
   origin: OriginEvidence;
   references: ReferenceInfo[];
