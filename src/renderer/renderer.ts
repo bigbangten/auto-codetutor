@@ -289,7 +289,7 @@ interface OriginPresentation {
   label: string;
   detail: string;
   className: 'user' | 'mex' | 'rtd' | 'ai-confirmed' | 'external' | 'unknown';
-  confidence: string;
+  confidence?: string;
 }
 
 function originPresentation(symbol: SymbolRecord): OriginPresentation {
@@ -308,7 +308,7 @@ function originPresentation(symbol: SymbolRecord): OriginPresentation {
     };
   }
   if (symbol.origin.kind === 'mex') return {
-    label: 'MEX 자동 생성 코드',
+    label: 'MEX 생성 코드',
     detail: 'S32 Configuration Tools(MEX)가 만든 코드로 판정했습니다. 직접 수정하면 재생성 시 덮어써질 수 있습니다.',
     className: 'mex', confidence: confidenceLabels[symbol.origin.confidence],
   };
@@ -323,14 +323,14 @@ function originPresentation(symbol: SymbolRecord): OriginPresentation {
     className: 'ai-confirmed', confidence: '작성 기록 확인',
   };
   if (/^src\//i.test(primaryFile)) return {
-    label: '사용자 관리 코드',
-    detail: 'src에 있고 MEX·RTD 생성 근거가 없어 사용자가 관리하는 코드 영역으로 분류했습니다. 사람 또는 AI 중 누가 작성했는지는 작업 기록 없이는 확정할 수 없습니다.',
-    className: 'user', confidence: '작성자 미확인',
+    label: '사용자 코드',
+    detail: '프로젝트의 src 영역에서 직접 관리하는 애플리케이션 코드입니다. MEX 생성 코드나 RTD·SDK 공급 코드로 판정할 명시적 근거는 없습니다.',
+    className: 'user',
   };
   return {
-    label: '기타 프로젝트 코드',
-    detail: 'MEX·RTD·AI 작성 근거를 찾지 못한 프로젝트 내부 코드입니다.',
-    className: 'unknown', confidence: '출처 미확인',
+    label: '프로젝트 코드',
+    detail: '프로젝트 내부 코드이며 MEX 생성 코드나 RTD·SDK 공급 코드로 판정할 명시적 근거는 없습니다.',
+    className: 'unknown',
   };
 }
 
@@ -734,8 +734,11 @@ function renderSymbol(symbol: SymbolRecord): void {
   const titleRow = document.createElement('div'); titleRow.className = 'symbol-title-row';
   const kind = document.createElement('span'); kind.className = 'kind-badge'; kind.textContent = kindLabels[symbol.kind];
   const origin = document.createElement('span'); origin.className = `origin-badge ${sourceRole.className}`; origin.textContent = sourceRole.label;
-  const confidence = document.createElement('span'); confidence.className = 'confidence-badge'; confidence.textContent = sourceRole.confidence;
-  titleRow.append(kind, origin, confidence);
+  titleRow.append(kind, origin);
+  if (sourceRole.confidence) {
+    const confidence = document.createElement('span'); confidence.className = 'confidence-badge'; confidence.textContent = sourceRole.confidence;
+    titleRow.append(confidence);
+  }
   const title = document.createElement('h2'); title.textContent = symbol.name;
   const signature = document.createElement('div'); signature.className = 'symbol-signature'; signature.textContent = compactDeclaration(symbol.signature || `${symbol.type} ${symbol.name}`);
   header.append(titleRow, title, signature); content.append(header);

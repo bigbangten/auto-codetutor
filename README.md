@@ -124,7 +124,7 @@ npm run dist
 The current build is written to:
 
 ```text
-release-0.9.7/Auto-CodeTutor-0.9.7-portable.exe
+release-0.9.8/Auto-CodeTutor-0.9.8-portable.exe
 ```
 
 ## Honest Boundaries

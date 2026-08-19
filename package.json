@@ -1,6 +1,6 @@
 {
   "name": "codetutor-next",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "An AI-native Windows workspace for understanding embedded C projects through grounded analysis and visual execution flows.",
   "private": true,
   "author": "김영민 <bigbangten95@gmail.com>",
@@ -46,7 +46,7 @@
     "productName": "Auto CodeTutor",
     "asar": true,
     "directories": {
-      "output": "release-0.9.7"
+      "output": "release-0.9.8"
     },
     "files": [
       "dist/**",

@@ -39,7 +39,13 @@ export function classifyOrigin(
   const lower = normalized.toLocaleLowerCase('en-US');
   const userManagedPath = /^src\//.test(lower);
   const generatedPath = /(^|\/)(generate(?:d|_code)?|codegen|gen)(\/|$)/.test(lower);
-  const generatedLine = matchingLine(source, /(auto[- ]?generated|generated (?:code|file)|do not edit|s32 configuration tools|mex)/i);
+  // Mentioning MEX or consuming a MEX-configured peripheral does not mean the
+  // surrounding application source was generated. Only explicit generation
+  // notices qualify as file-level evidence.
+  const generatedLine = matchingLine(
+    source,
+    /(auto[- ]?generated|generated (?:code|file|source)|generated\s+by\s+(?:s32(?:\s+configuration\s+tools?)?|mex|configuration\s+tools?)|(?:s32(?:\s+configuration\s+tools?)?|mex|configuration\s+tools?)[ -]generated)/i,
+  );
   const matchedComponent = mex.components.find((name) => lower.includes(name.toLocaleLowerCase('en-US')) || source.slice(0, 5000).includes(name));
 
   if (generatedPath || generatedLine !== null) {
@@ -82,15 +88,15 @@ export function classifyOrigin(
 
   return {
     kind: 'unknown',
-    label: userManagedPath ? '사용자 관리 코드' : '프로젝트 코드 · 출처 미확인',
+    label: userManagedPath ? '사용자 코드' : '프로젝트 코드',
     confidence: 'limited',
     rule: userManagedPath
-      ? 'src 코드이며 MEX·RTD 생성 근거가 없음. 작성 주체는 작업 기록 없이는 확정할 수 없음'
-      : 'MEX·RTD 근거 또는 신뢰 가능한 AI 작업 기록이 없음',
+      ? 'src 경로이며 자동 생성 또는 RTD·SDK 공급 코드의 명시적 근거가 없음'
+      : '자동 생성 또는 RTD·SDK 공급 코드의 명시적 근거가 없음',
     anchors: [lineAnchor(file, 1)],
   };
 }
 
 export function originLabel(kind: OriginKind): string {
-  return ({ mex: 'MEX', rtd: 'RTD/SDK', 'ai-confirmed': 'AI 확인', unknown: '작성자 불명' })[kind];
+  return ({ mex: 'MEX 생성', rtd: 'RTD/SDK 공급', 'ai-confirmed': 'AI 작성 확인', unknown: '프로젝트 코드' })[kind];
 }
