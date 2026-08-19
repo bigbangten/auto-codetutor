@@ -127,8 +127,25 @@ export function buildFlowOverview(graph: CallGraph, focusId?: string, insight?: 
     const orderedNodes = stages.flatMap((stage) => stage.nodes);
     const stageCount = insight.stages.length;
     const buckets = Array.from({ length: stageCount }, () => [] as GraphNode[]);
+    const claimed = new Map<string, number>();
+    insight.stages.forEach((stage, stageIndex) => {
+      const names = new Set(stage.symbols ?? []);
+      for (const node of orderedNodes) if (names.has(node.name) && !claimed.has(node.id)) claimed.set(node.id, stageIndex);
+    });
+    const positions = new Map(orderedNodes.map((node, index) => [node.id, index]));
+    const seedPositions = insight.stages.map((_stage, stageIndex) => orderedNodes
+      .filter((node) => claimed.get(node.id) === stageIndex)
+      .map((node) => positions.get(node.id) ?? 0));
     orderedNodes.forEach((node, index) => {
-      const bucket = Math.min(stageCount - 1, Math.floor(index * stageCount / Math.max(1, orderedNodes.length)));
+      let bucket = claimed.get(node.id);
+      if (bucket === undefined && seedPositions.some((values) => values.length)) {
+        let bestDistance = Number.POSITIVE_INFINITY;
+        seedPositions.forEach((values, stageIndex) => {
+          const distance = values.reduce((minimum, position) => Math.min(minimum, Math.abs(position - index)), Number.POSITIVE_INFINITY);
+          if (distance < bestDistance) { bestDistance = distance; bucket = stageIndex; }
+        });
+      }
+      bucket ??= Math.min(stageCount - 1, Math.floor(index * stageCount / Math.max(1, orderedNodes.length)));
       buckets[bucket]!.push(node);
     });
     stages = insight.stages.map((semantic, index) => {

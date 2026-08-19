@@ -59,3 +59,33 @@ test('AI 목적 분석이 있으면 함수명이 아닌 사용자 기능 단계�
   assert.equal(overview.stages[0]?.focus, 'user');
   assert.equal(overview.location?.node.name, 'ReadSqi');
 });
+
+test('AI 단계의 대표 함수 이름으로 목적 단계와 실제 코드를 연결한다', () => {
+  const graph: CallGraph = {
+    nodes: [
+      node('main', 'main', 1, 'entry'),
+      node('setup', 'BoardSetup', 10),
+      node('measure', 'MeasureSqi', 20),
+      node('judge', 'JudgeCableHealth', 30),
+      node('send', 'SendDiagnosis', 40),
+    ],
+    edges: [
+      ['main', 'setup'], ['setup', 'measure'], ['measure', 'judge'], ['judge', 'send'],
+    ].map(([from, to], index) => ({
+      from: from!, to: to!, resolved: true,
+      range: { file: 'src/app.c', startLine: index + 1, startColumn: 1, endLine: index + 1, endColumn: 2 },
+    })),
+    roots: ['main'], truncated: false, limitations: [],
+  };
+  const insight: ProjectInsight = {
+    sourceHash: 'hash', purpose: '링크 품질을 판정해 진단 결과를 보냅니다.', model: 'model', updatedAt: new Date().toISOString(),
+    stages: [
+      { title: '품질 측정', summary: 'SQI를 읽습니다.', focus: 'user', symbols: ['MeasureSqi', 'JudgeCableHealth'] },
+      { title: '진단 전송', summary: '결과를 전송합니다.', focus: 'user', symbols: ['SendDiagnosis'] },
+    ],
+  };
+  const overview = buildFlowOverview(graph, 'judge', insight);
+  assert.equal(overview.location?.stageTitle, '품질 측정');
+  assert.ok(overview.stages[0]?.nodes.some((item) => item.name === 'MeasureSqi'));
+  assert.ok(overview.stages[1]?.nodes.some((item) => item.name === 'SendDiagnosis'));
+});

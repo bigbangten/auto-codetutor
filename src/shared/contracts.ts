@@ -71,6 +71,8 @@ export interface ProjectInsightStage {
   title: string;
   summary: string;
   focus: 'user' | 'platform' | 'mixed';
+  /** Exact project function names that best represent this purpose-oriented stage. */
+  symbols?: string[];
 }
 
 export interface ProjectInsight {
@@ -205,6 +207,25 @@ export interface ProjectSnapshot {
     indexedAt: string;
   };
   limitations: string[];
+  buildContext?: BuildContextInfo;
+}
+
+export interface BuildConfiguration {
+  id: string;
+  name: string;
+  toolchain?: string;
+  defines: string[];
+  includePaths: string[];
+  buildPath?: string;
+}
+
+export interface BuildContextInfo {
+  enabled: boolean;
+  available: boolean;
+  source?: '.cproject';
+  activeConfigurationId?: string;
+  configurations: BuildConfiguration[];
+  note: string;
 }
 
 export interface GraphNode {
@@ -377,6 +398,9 @@ export interface AppSettings {
   commentModel: string;
   commentEffort: AIRequest['effort'];
   commentFast: boolean;
+  /** Experimental, opt-in S32DS/CDT build metadata awareness. */
+  buildContextEnabled: boolean;
+  buildConfigurations: Record<string, string>;
 }
 
 export interface AnalysisCacheState {
@@ -437,7 +461,8 @@ export type AppCommand =
   | 'export-notes'
   | 'focus-projects'
   | 'show-flow'
-  | 'show-chat';
+  | 'show-chat'
+  | 'build-context-changed';
 
 export interface CodeTutorApi {
   pickProject(): Promise<string | null>;
@@ -480,6 +505,8 @@ export interface CodeTutorApi {
   saveUiState(state: Partial<UiState>): Promise<UiState>;
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
+  getBuildContext(): Promise<BuildContextInfo>;
+  selectBuildConfiguration(configurationId: string): Promise<BuildContextInfo>;
   applyGeneratedComments(request: CommentApplyRequest): Promise<CommentApplyResult>;
   onJobEvent(listener: (event: AIJobEvent) => void): () => void;
   onBackgroundAnalysis(listener: (status: BackgroundAnalysisStatus) => void): () => void;

@@ -42,10 +42,11 @@ test('Codex completed agent messages replace progress text so the last answer wi
 });
 
 test('프로젝트 목적 JSON을 사용자 기능 단계로 구조화한다', () => {
-  const output = '```json\n{"purpose":"SQI를 측정해 케이블 상태를 전송한다.","stages":[{"title":"SQI 측정","summary":"PHY 품질 값을 읽는다.","focus":"user"},{"title":"진단 전송","summary":"Ethernet 메시지로 보낸다.","focus":"mixed"}]}\n```';
+  const output = '```json\n{"purpose":"SQI를 측정해 케이블 상태를 전송한다.","stages":[{"title":"SQI 측정","summary":"PHY 품질 값을 읽는다.","focus":"user","symbols":["MeasureSqi"]},{"title":"진단 전송","summary":"Ethernet 메시지로 보낸다.","focus":"mixed","symbols":["SendDiagnosis"]}]}\n```';
   const insight = parseProjectInsightOutput(output, 'hash', 'gpt-5.6-terra');
   assert.equal(insight.purpose, 'SQI를 측정해 케이블 상태를 전송한다.');
   assert.equal(insight.stages[1]?.focus, 'mixed');
+  assert.deepEqual(insight.stages[0]?.symbols, ['MeasureSqi']);
 });
 
 test('배치 심볼 JSON의 필드 의미와 코드 근거를 캐시 형식으로 변환한다', () => {

@@ -189,14 +189,20 @@
           </div>
         </div>
         <div class="section-divider"><span>이해도 체크</span></div>
-        <div id="quiz-list"><p class="empty">함수를 선택하고 이해도 체크를 만들어 보세요.</p></div>
+        <div id="quiz-list"><p class="empty">심볼을 선택하고 이해도 체크를 만들어 보세요.</p></div>
       </section>
     </aside>
   </main>
 
   <footer id="statusbar">
     <span id="status-message">준비됨</span>
-    <span id="cursor-position">Ln 1, Col 1</span>
+    <div class="statusbar-tools">
+      <label id="build-context-status" class="build-context-status" title=".cproject 빌드 설정 인식은 실험 기능입니다." hidden>
+        <span>Build</span>
+        <select id="build-context-select" aria-label="분석에 사용할 빌드 구성"></select>
+      </label>
+      <span id="cursor-position">Ln 1, Col 1</span>
+    </div>
   </footer>
   <div id="editor-context-menu" class="editor-context-menu" role="menu" hidden>
     <button id="context-ask-selection" role="menuitem">선택 영역을 AI에 질문</button>

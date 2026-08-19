@@ -24,7 +24,13 @@ function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-function installApplicationMenu(): void {
+function selectedBuildConfiguration(current: AppSettings, rootPath: string | null): string | undefined {
+  if (!rootPath) return undefined;
+  const match = Object.entries(current.buildConfigurations).find(([savedPath]) => sameProjectPath(savedPath, rootPath));
+  return match?.[1];
+}
+
+function installApplicationMenu(currentSettings: AppSettings): void {
   const command = (value: AppCommand) => () => send('app:command', value);
   const template: MenuItemConstructorOptions[] = [
     {
@@ -72,6 +78,24 @@ function installApplicationMenu(): void {
       ],
     },
     {
+      label: '분석',
+      submenu: [
+        {
+          label: '빌드 설정 인식 (실험적)',
+          type: 'checkbox',
+          checked: currentSettings.buildContextEnabled,
+          toolTip: '.cproject의 선택 구성, define, include 경로를 AI 분석 문맥에 반영합니다.',
+          click: async (item) => {
+            const next = await settings.save({ buildContextEnabled: item.checked });
+            if (project?.root) {
+              await project.configureBuildContext(item.checked, selectedBuildConfiguration(next, project.root));
+            }
+            send('app:command', 'build-context-changed' satisfies AppCommand);
+          },
+        },
+      ],
+    },
+    {
       label: '도움말',
       submenu: [
         {
@@ -102,9 +126,9 @@ function installIpc(): void {
     if (typeof rootPath !== 'string' || !rootPath.trim()) throw new Error('프로젝트 경로가 올바르지 않습니다.');
     await ai.cancelBackgroundAnalysis(false);
     await Promise.all(ai.list().filter((job) => job.state === 'queued' || job.state === 'running').map((job) => ai.cancel(job.id)));
-    const snapshot = await project.open(rootPath);
-    learning.bind(project.projectDataDir!, (id) => project.getSymbol(id));
     const current = await settings.get();
+    const snapshot = await project.open(rootPath, current.buildContextEnabled, selectedBuildConfiguration(current, rootPath));
+    learning.bind(project.projectDataDir!, (id) => project.getSymbol(id));
     await settings.save({
       recentProjects: [snapshot.rootPath, ...current.recentProjects.filter((item) => item !== snapshot.rootPath)],
       openProjects: current.openProjects.includes(snapshot.rootPath)
@@ -222,6 +246,14 @@ function installIpc(): void {
   ipcMain.handle('ui:save', (_event, state: Partial<UiState>) => learning.saveUiState(state));
   ipcMain.handle('settings:get', () => settings.get());
   ipcMain.handle('settings:save', (_event, changes: Partial<AppSettings>) => settings.save(changes));
+  ipcMain.handle('build:context', () => project.buildContextInfo());
+  ipcMain.handle('build:select', async (_event, configurationId: unknown) => {
+    if (!project.root || typeof configurationId !== 'string') throw new Error('선택할 빌드 구성이 올바르지 않습니다.');
+    const current = await settings.get();
+    const buildConfigurations = { ...current.buildConfigurations, [project.root]: configurationId };
+    await settings.save({ buildConfigurations });
+    return project.configureBuildContext(current.buildContextEnabled, configurationId);
+  });
   ipcMain.handle('comments:apply', (_event, request: CommentApplyRequest) => project.applyGeneratedComments(request));
 }
 
@@ -239,7 +271,8 @@ async function createWindow(): Promise<void> {
     await settings.save({ autoAnalyzeSymbols: false });
   }
   if (smokeProject) {
-    await project.open(smokeProject);
+    const current = await settings.get();
+    await project.open(smokeProject, current.buildContextEnabled, selectedBuildConfiguration(current, smokeProject));
     learning.bind(project.projectDataDir!, (id) => project.getSymbol(id));
   }
 
@@ -260,7 +293,7 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
     },
   });
-  installApplicationMenu();
+  installApplicationMenu(await settings.get());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//i.test(url)) void shell.openExternal(url);
     return { action: 'deny' };

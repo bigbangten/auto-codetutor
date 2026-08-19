@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   commentModel: 'gpt-5.6-sol',
   commentEffort: 'medium',
   commentFast: false,
+  buildContextEnabled: false,
+  buildConfigurations: {},
 };
 
 interface SemanticCatalog {
@@ -53,7 +55,10 @@ export class GlobalSettingsStore {
     const activeProject = typeof stored.activeProject === 'string'
       ? stored.activeProject
       : openProjects[0];
-    return { ...DEFAULT_SETTINGS, ...stored, recentProjects, openProjects, activeProject };
+    const buildConfigurations = stored.buildConfigurations && typeof stored.buildConfigurations === 'object' && !Array.isArray(stored.buildConfigurations)
+      ? Object.fromEntries(Object.entries(stored.buildConfigurations).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      : {};
+    return { ...DEFAULT_SETTINGS, ...stored, recentProjects, openProjects, activeProject, buildConfigurations };
   }
 
   async save(changes: Partial<AppSettings>): Promise<AppSettings> {

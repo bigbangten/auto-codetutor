@@ -10,6 +10,7 @@ import type {
   AppCommand,
   AppSettings,
   BackgroundAnalysisStatus,
+  BuildContextInfo,
   CallGraph,
   ChatThread,
   CodeTutorApi,
@@ -82,6 +83,7 @@ const state: {
   analysisStatus: BackgroundAnalysisStatus | null;
   projectInsight: ProjectInsight | null;
   symbolInsights: Map<string, SymbolInsight>;
+  buildContext: BuildContextInfo | null;
 } = {
   snapshot: null, currentFile: null, currentSymbol: null, currentSelection: null, questionContext: null,
   engines: [], jobs: new Map(), activeExplainJob: null, currentChatId: null,
@@ -89,6 +91,7 @@ const state: {
   graphReset: null, expandedFolders: new Set(), decorations: [], settings: null, reference: null,
   symbolSummaryJobs: new Map(), activeCommentJob: null, commentTarget: null, commentOutput: '', commentBatch: null,
   analysisStatus: null, projectInsight: null, symbolInsights: new Map(),
+  buildContext: null,
 };
 
 monaco.editor.defineTheme('codetutor-vscode', {
@@ -272,6 +275,13 @@ function section(title: string): HTMLElement {
   const heading = document.createElement('h3'); heading.textContent = title; node.append(heading); return node;
 }
 
+function collapsibleSection(title: string, open = false): { section: HTMLDetailsElement; body: HTMLDivElement } {
+  const node = document.createElement('details'); node.className = 'info-section collapsible-info'; node.open = open;
+  const heading = document.createElement('summary'); heading.textContent = title;
+  const body = document.createElement('div'); body.className = 'collapsible-info-body';
+  node.append(heading, body); return { section: node, body };
+}
+
 const kindLabels: Record<SymbolRecord['kind'], string> = {
   function: '함수', variable: '변수', parameter: '매개변수', typedef: '타입 별칭',
   struct: '구조체', union: '공용체', enum: '열거형', field: '필드', macro: '매크로',
@@ -359,8 +369,14 @@ function appendSymbolAI(parent: HTMLElement, symbol: SymbolRecord): void {
     : state.analysisStatus && ['queued', 'running'].includes(state.analysisStatus.state)
       ? '백그라운드 사전 분석 대기 중 · 필요하면 분석 실행으로 우선 처리할 수 있습니다.'
       : '저장된 설명이 없습니다. 분석 실행을 누르면 전용 경량 모델로 분석합니다.';
+  const evidence = document.createElement('small'); evidence.className = 'symbol-evidence-level';
+  evidence.textContent = symbol.synthetic
+    ? '근거 · 프로젝트 안의 실제 사용 코드와 정적 참조'
+    : symbol.references.length
+      ? `근거 · 선언/정의와 정적 참조 ${symbol.references.length}곳`
+      : '근거 · 선언 또는 정의 위치';
   const output = document.createElement('article'); output.id = 'symbol-ai-output'; output.className = 'markdown-output';
-  card.append(header, status, output); parent.append(card);
+  card.append(header, status, evidence, output); parent.append(card);
   if (insight) void renderSymbolInsight(insight);
   const existing = state.symbolSummaryJobs.get(symbol.id);
   const job = existing ? state.jobs.get(existing) : null;
@@ -597,13 +613,15 @@ function describeObservedArgument(value: string, position: number): string {
   return `${value}의 현재 값을 ${position}번째 인자로 전달합니다. 정확한 매개변수 타입은 외부 선언에서 확인해야 합니다.`;
 }
 
-function appendCallList(parent: HTMLElement, title: string, calls: SymbolRecord['calls'] | SymbolRecord['callers']): void {
+function appendCallList(parent: HTMLElement, title: string, calls: SymbolRecord['calls'] | SymbolRecord['callers'], collapsed = true): void {
   const unique = [...new Map(calls.map((call) => [`${call.range.file}:${call.range.startLine}:${call.range.startColumn}:${call.name}:${call.arguments?.join(',') ?? ''}`, call] as const)).values()]
     .sort((left, right) => callPathPriority(left.range.file) - callPathPriority(right.range.file)
       || left.range.file.localeCompare(right.range.file)
       || left.range.startLine - right.range.startLine);
-  const area = section(`${title} · ${unique.length}`);
-  if (!unique.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '확인된 항목 없음'; area.append(empty); }
+  const collapsible = collapsed ? collapsibleSection(`${title} · ${unique.length}`) : null;
+  const area = collapsible?.section ?? section(`${title} · ${unique.length}`);
+  const body = collapsible?.body ?? area;
+  if (!unique.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '확인된 항목 없음'; body.append(empty); }
   const appendCall = (call: (typeof unique)[number], host: HTMLElement): void => {
     const button = sourceLink(
       call.range,
@@ -613,11 +631,11 @@ function appendCallList(parent: HTMLElement, title: string, calls: SymbolRecord[
     ); button.className = 'call-link';
     button.addEventListener('dblclick', () => { if (call.symbolId) void selectSymbol(call.symbolId, true); }); host.append(button);
   };
-  unique.slice(0, 14).forEach((call) => appendCall(call, area));
+  unique.slice(0, 14).forEach((call) => appendCall(call, body));
   if (unique.length > 14) {
     const more = document.createElement('details'); more.className = 'compact-more call-list-more';
     const summary = document.createElement('summary'); summary.textContent = `추가 호출 ${unique.length - 14}개 보기`; more.append(summary);
-    unique.slice(14).forEach((call) => appendCall(call, more)); area.append(more);
+    unique.slice(14).forEach((call) => appendCall(call, more)); body.append(more);
   }
   parent.append(area);
 }
@@ -630,12 +648,14 @@ function callPathPriority(file: string): number {
   return 2;
 }
 
-function appendReferences(parent: HTMLElement, title: string, references: SymbolRecord['references'], emphasis = false): void {
-  const area = section(`${title} · ${references.length}`);
+function appendReferences(parent: HTMLElement, title: string, references: SymbolRecord['references'], emphasis = false, collapsed = false): void {
+  const collapsible = collapsed ? collapsibleSection(`${title} · ${references.length}`) : null;
+  const area = collapsible?.section ?? section(`${title} · ${references.length}`);
+  const body = collapsible?.body ?? area;
   if (!references.length) {
     const empty = document.createElement('p'); empty.className = 'empty';
     empty.textContent = emphasis ? '정적 분석에서 확인된 값 변경 지점이 없습니다.' : '확인된 참조가 없습니다.';
-    area.append(empty);
+    body.append(empty);
   }
   references.slice(0, 100).forEach((reference) => {
     const link = sourceLink(
@@ -662,9 +682,58 @@ function appendReferences(parent: HTMLElement, title: string, references: Symbol
       link.append(expansion);
     }
     if (emphasis) link.classList.add('write-reference');
-    area.append(link);
+    body.append(link);
   });
   parent.append(area);
+}
+
+function valueFlowText(reference: SymbolRecord['references'][number]): string {
+  const source = reference.valueExpression ?? reference.expression ?? reference.changeDescription;
+  if (!source) return reference.container ?? '값 확인 필요';
+  if (reference.calculatedValue) return `${source} = ${reference.calculatedValue}`;
+  if (reference.expandedValue && reference.expandedValue !== source) return `${source} → ${reference.expandedValue}`;
+  return source;
+}
+
+function appendValueFlow(parent: HTMLElement, symbol: SymbolRecord): void {
+  const writes = symbol.references.filter((reference) => reference.kind === 'write');
+  const reads = symbol.references.filter((reference) => reference.kind === 'read');
+  const flow = collapsibleSection(`값 흐름 요약 · 입력 ${writes.length} / 사용 ${reads.length}`);
+  flow.section.classList.add('value-flow');
+  const chain = document.createElement('div'); chain.className = 'value-flow-chain';
+  const incoming = document.createElement('div'); incoming.className = 'value-flow-column incoming';
+  const incomingTitle = document.createElement('strong'); incomingTitle.textContent = '들어오는 값'; incoming.append(incomingTitle);
+  if (!writes.length) {
+    const empty = document.createElement('span'); empty.className = 'value-flow-empty'; empty.textContent = '확인된 대입 없음'; incoming.append(empty);
+  }
+  for (const reference of writes.slice(0, 5)) {
+    const button = document.createElement('button'); button.className = 'value-flow-item';
+    const code = document.createElement('code'); code.textContent = valueFlowText(reference);
+    const anchor = document.createElement('small'); anchor.textContent = `${reference.range.file}:${reference.range.startLine}`;
+    button.append(code, anchor); button.addEventListener('click', () => void navigate(reference.range)); incoming.append(button);
+  }
+  const center = document.createElement('div'); center.className = 'value-flow-symbol';
+  const arrowIn = document.createElement('span'); arrowIn.textContent = '→';
+  const selected = document.createElement('code'); selected.textContent = symbol.name;
+  const arrowOut = document.createElement('span'); arrowOut.textContent = '→'; center.append(arrowIn, selected, arrowOut);
+  const outgoing = document.createElement('div'); outgoing.className = 'value-flow-column outgoing';
+  const outgoingTitle = document.createElement('strong'); outgoingTitle.textContent = '사용되는 곳'; outgoing.append(outgoingTitle);
+  const destinations = [...new Map(reads.map((reference) => [reference.container ?? `${reference.range.file}:${reference.range.startLine}`, reference] as const)).values()];
+  if (!destinations.length) {
+    const empty = document.createElement('span'); empty.className = 'value-flow-empty'; empty.textContent = '확인된 읽기 없음'; outgoing.append(empty);
+  }
+  for (const reference of destinations.slice(0, 5)) {
+    const button = document.createElement('button'); button.className = 'value-flow-item';
+    const code = document.createElement('code'); code.textContent = reference.container ?? `${reference.range.file}:${reference.range.startLine}`;
+    const anchor = document.createElement('small'); anchor.textContent = `${reference.range.file}:${reference.range.startLine}`;
+    button.append(code, anchor); button.addEventListener('click', () => void navigate(reference.range)); outgoing.append(button);
+  }
+  chain.append(incoming, center, outgoing); flow.body.append(chain);
+  if (writes.length > 5 || destinations.length > 5) {
+    const note = document.createElement('small'); note.className = 'value-flow-note';
+    note.textContent = '대표 항목만 표시합니다. 아래 상세 목록에서 전체 위치를 확인할 수 있습니다.'; flow.body.append(note);
+  }
+  parent.append(flow.section);
 }
 
 function appendMacroValue(parent: HTMLElement, symbol: SymbolRecord): void {
@@ -727,6 +796,42 @@ function appendOriginEvidence(parent: HTMLElement, symbol: SymbolRecord, sourceR
   evidence.append(body); parent.append(evidence);
 }
 
+function appendTechnicalDetails(parent: HTMLElement, symbol: SymbolRecord): void {
+  const details = collapsibleSection('선언 정보');
+  const grid = document.createElement('dl'); grid.className = 'info-grid compact-technical-grid';
+  const location = symbol.definition ?? symbol.declaration;
+  const rows: Array<[string, string]> = [
+    ['유효 범위', symbol.scope],
+    [symbol.definition ? '정의 위치' : '선언 위치', `${location.file}:${location.startLine}`],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement('dt'); dt.textContent = label;
+    const dd = document.createElement('dd'); dd.textContent = value; grid.append(dt, dd);
+  }
+  details.body.append(grid);
+  if (!symbol.synthetic) details.body.append(sourceLink(location, symbol.definition ? '정의로 이동' : '선언으로 이동'));
+  if (symbol.resolvedType && !symbol.resolvedType.inferred) {
+    const typeLink = sourceLink(symbol.resolvedType.range, `타입 정의로 이동 · ${symbol.resolvedType.name}`);
+    typeLink.classList.add('type-definition-link');
+    typeLink.addEventListener('dblclick', () => void selectSymbol(symbol.resolvedType!.symbolId, true)); details.body.append(typeLink);
+  } else if (symbol.resolvedType?.inferred) {
+    const unresolvedType = document.createElement('p'); unresolvedType.className = 'type-use-note';
+    unresolvedType.textContent = `${symbol.resolvedType.name} 정의는 열린 프로젝트 밖에 있어 실제 멤버 사용 코드에서 구성을 복원했습니다.`;
+    details.body.append(unresolvedType);
+  }
+  parent.append(details.section);
+}
+
+function appendLearningCheck(parent: HTMLElement, symbol: SymbolRecord): void {
+  const details = collapsibleSection('학습 확인 · 3문항');
+  details.section.classList.add('learning-check');
+  const copy = document.createElement('p');
+  copy.textContent = `${symbol.name}의 역할과 값 흐름을 내 말로 설명할 수 있는지 짧게 확인합니다.`;
+  const button = document.createElement('button'); button.className = 'ghost'; button.textContent = '문항 만들기';
+  button.addEventListener('click', () => void createQuiz());
+  details.body.append(copy, button); parent.append(details.section);
+}
+
 function renderSymbol(symbol: SymbolRecord): void {
   $('symbol-empty').hidden = true; const content = $('symbol-content'); content.hidden = false; content.replaceChildren();
   const sourceRole = originPresentation(symbol);
@@ -735,35 +840,16 @@ function renderSymbol(symbol: SymbolRecord): void {
   const kind = document.createElement('span'); kind.className = 'kind-badge'; kind.textContent = kindLabels[symbol.kind];
   const origin = document.createElement('span'); origin.className = `origin-badge ${sourceRole.className}`; origin.textContent = sourceRole.label;
   titleRow.append(kind, origin);
-  if (sourceRole.confidence) {
-    const confidence = document.createElement('span'); confidence.className = 'confidence-badge'; confidence.textContent = sourceRole.confidence;
-    titleRow.append(confidence);
-  }
   const title = document.createElement('h2'); title.textContent = symbol.name;
   const signature = document.createElement('div'); signature.className = 'symbol-signature'; signature.textContent = compactDeclaration(symbol.signature || `${symbol.type} ${symbol.name}`);
   header.append(titleRow, title, signature); content.append(header);
 
-  const basics = section('정의 및 타입'); const grid = document.createElement('dl'); grid.className = 'info-grid';
+  const basics = section('한눈에 보기'); const grid = document.createElement('dl'); grid.className = 'info-grid symbol-summary-grid';
   const rows: Array<[string, string]> = symbol.kind === 'macro'
-    ? [['분류', kindLabels[symbol.kind]], ['매크로 종류', symbol.macro?.functionLike ? '함수형 매크로' : '객체형 매크로'], ['유효 범위', symbol.scope]]
-    : [['분류', kindLabels[symbol.kind]], ['데이터 타입', compactDeclaration(symbol.type)], ['유효 범위', symbol.scope]];
-  if (!symbol.synthetic) {
-    const location = symbol.definition ?? symbol.declaration;
-    rows.push([symbol.definition ? '정의 위치' : '선언 위치', `${location.file}:${location.startLine}`]);
-  }
+    ? [['종류', symbol.macro?.functionLike ? '함수형 매크로' : '객체형 매크로']]
+    : [['데이터 타입', compactDeclaration(symbol.type)]];
   for (const [label, value] of rows) { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); dd.textContent = value; grid.append(dt, dd); }
   basics.append(grid); appendMacroValue(basics, symbol);
-  if (!symbol.synthetic) basics.append(sourceLink(symbol.definition ?? symbol.declaration, symbol.definition ? '정의로 이동' : '선언으로 이동'));
-  if (symbol.resolvedType && !symbol.resolvedType.inferred) {
-    const typeLink = sourceLink(symbol.resolvedType.range, `타입 정의로 이동 · ${symbol.resolvedType.name}`);
-    typeLink.classList.add('type-definition-link');
-    typeLink.addEventListener('dblclick', () => void selectSymbol(symbol.resolvedType!.symbolId, true));
-    basics.append(typeLink);
-  } else if (symbol.resolvedType?.inferred) {
-    const unresolvedType = document.createElement('p'); unresolvedType.className = 'type-use-note';
-    unresolvedType.textContent = `${symbol.resolvedType.name} 정의는 열린 프로젝트 밖에 있어, 아래 구성은 실제 멤버 사용 코드에서 복원했습니다.`;
-    basics.append(unresolvedType);
-  }
   appendTypeExplanation(basics, symbol); content.append(basics);
 
   // The semantic explanation is the primary learning aid, so keep it directly
@@ -795,21 +881,28 @@ function renderSymbol(symbol: SymbolRecord): void {
   }
 
   if (symbol.kind === 'function') {
-    appendCallList(content, '호출자 (Callers)', symbol.callers);
-    appendCallList(content, '호출 대상 (Callees)', symbol.calls);
-    appendReferences(content, '참조 위치 (References)', symbol.references);
+    appendCallList(content, '호출자', symbol.callers);
+    appendCallList(content, '호출 대상', symbol.calls);
+    appendReferences(content, '참조 위치', symbol.references, false, true);
   } else if (symbol.kind === 'variable' || symbol.kind === 'parameter' || symbol.kind === 'field') {
-    appendReferences(content, '값 변경 지점 (Writes)', symbol.references.filter((reference) => reference.kind === 'write'), true);
-    appendReferences(content, '값 읽기 위치 (Reads)', symbol.references.filter((reference) => reference.kind === 'read'));
-    appendReferences(content, '선언 및 기타 참조', symbol.references.filter((reference) => reference.kind !== 'write' && reference.kind !== 'read'));
+    appendValueFlow(content, symbol);
+    appendReferences(content, '값 변경 지점', symbol.references.filter((reference) => reference.kind === 'write'), true);
+    appendReferences(content, '값 읽기 위치', symbol.references.filter((reference) => reference.kind === 'read'), false, true);
+    appendReferences(content, '선언 및 기타 참조', symbol.references.filter((reference) => reference.kind !== 'write' && reference.kind !== 'read'), false, true);
   } else {
-    appendReferences(content, '참조 위치 (References)', symbol.references);
+    appendReferences(content, '참조 위치', symbol.references, false, true);
   }
-  if (symbol.limitations.length) { const caveat = document.createElement('div'); caveat.className = 'caveat'; caveat.textContent = symbol.limitations.join(' '); content.append(caveat); }
+  appendLearningCheck(content, symbol);
+  appendTechnicalDetails(content, symbol);
+  if (symbol.limitations.length) {
+    const limitations = collapsibleSection(`분석 한계 · ${symbol.limitations.length}`);
+    const caveat = document.createElement('div'); caveat.className = 'caveat'; caveat.textContent = symbol.limitations.join(' ');
+    limitations.body.append(caveat); content.append(limitations.section);
+  }
   appendOriginEvidence(content, symbol, sourceRole);
 
   updateExplainScope();
-  ($<HTMLButtonElement>('create-quiz')).disabled = symbol.kind !== 'function';
+  ($<HTMLButtonElement>('create-quiz')).disabled = false;
   updateBreadcrumbs();
   if (!state.symbolInsights.has(symbol.id)) void loadSymbolInsight(symbol, true);
 }
@@ -1463,6 +1556,39 @@ async function refreshReference(): Promise<void> {
   if (info) renderReference(info);
 }
 
+function renderBuildContext(context: BuildContextInfo): void {
+  state.buildContext = context;
+  const host = $<HTMLLabelElement>('build-context-status');
+  const select = $<HTMLSelectElement>('build-context-select');
+  host.hidden = !context.enabled;
+  host.title = context.note;
+  select.replaceChildren();
+  if (!context.available) {
+    const option = document.createElement('option'); option.textContent = '.cproject 없음'; option.value = '';
+    select.append(option); select.disabled = true; return;
+  }
+  for (const configuration of context.configurations) {
+    const option = document.createElement('option'); option.value = configuration.id;
+    option.textContent = `${configuration.name} · D${configuration.defines.length}/I${configuration.includePaths.length}`;
+    select.append(option);
+  }
+  select.disabled = false;
+  select.value = context.activeConfigurationId ?? context.configurations[0]?.id ?? '';
+}
+
+async function refreshBuildContext(): Promise<void> {
+  renderBuildContext(await window.codeTutor.getBuildContext());
+}
+
+async function selectBuildContext(configurationId: string): Promise<void> {
+  if (!configurationId) return;
+  const context = await guarded(() => window.codeTutor.selectBuildConfiguration(configurationId), '빌드 구성 선택');
+  if (!context) return;
+  renderBuildContext(context);
+  const active = context.configurations.find((configuration) => configuration.id === context.activeConfigurationId);
+  toast(`${active?.name ?? '선택한 구성'}의 define·include 정보를 AI 분석 문맥에 사용합니다.`);
+}
+
 async function pickReferenceFolder(): Promise<void> {
   if (!state.snapshot) { toast('레퍼런스를 연결할 프로젝트를 먼저 여세요.', true); return; }
   $('reference-popover').hidden = false;
@@ -1487,6 +1613,16 @@ function handleAppCommand(command: AppCommand): void {
   }
   if (command === 'pick-reference-folder') { void pickReferenceFolder(); return; }
   if (command === 'export-notes') { void exportLearningNotes(); return; }
+  if (command === 'build-context-changed') {
+    void (async () => {
+      state.settings = await window.codeTutor.getSettings();
+      await refreshBuildContext();
+      toast(state.settings.buildContextEnabled
+        ? '빌드 설정 인식을 켰습니다. .cproject 정보가 AI 분석 문맥에 반영됩니다.'
+        : '빌드 설정 인식을 껐습니다. 일반 프로젝트 분석으로 돌아갑니다.');
+    })();
+    return;
+  }
   if (command === 'focus-projects') {
     const target = document.querySelector<HTMLElement>('.project-item.active') ?? $<HTMLButtonElement>('open-project');
     target.focus(); target.scrollIntoView({ block: 'nearest' }); return;
@@ -1691,7 +1827,7 @@ async function saveNote(): Promise<void> {
 async function refreshQuizzes(): Promise<void> {
   const quizzes = await guarded(() => window.codeTutor.listQuizzes(state.currentSymbol?.id), '이해도 체크'); if (!quizzes) return;
   const list = $('quiz-list'); list.replaceChildren();
-  if (!quizzes.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '이 함수의 이해도 체크가 아직 없습니다.'; list.append(empty); return; }
+  if (!quizzes.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.currentSymbol ? '이 심볼의 이해도 체크가 아직 없습니다.' : '심볼을 선택하고 이해도 체크를 만들어 보세요.'; list.append(empty); return; }
   quizzes.forEach((quiz) => list.append(renderQuiz(quiz)));
 }
 
@@ -1709,13 +1845,14 @@ function renderQuiz(quiz: QuizSession): HTMLElement {
 }
 
 async function createQuiz(): Promise<void> {
-  if (!state.currentSymbol || state.currentSymbol.kind !== 'function') return;
+  if (!state.currentSymbol) { toast('이해도를 확인할 심볼을 먼저 선택하세요.', true); return; }
   activateTab('notes'); const job = await guarded(() => window.codeTutor.startAI({ kind: 'quiz', symbolId: state.currentSymbol!.id, ...selectedAI() }), '이해도 체크');
   if (job) { state.jobs.set(job.id, job); renderJobs(); toast('이해도 체크를 생성하고 있습니다. 다른 탭으로 이동해도 계속됩니다.'); }
 }
 
 function renderSnapshot(snapshot: ProjectSnapshot): void {
   const projectChanged = state.snapshot?.rootPath !== snapshot.rootPath;
+  if (snapshot.buildContext) renderBuildContext(snapshot.buildContext);
   const indexChanged = state.snapshot?.stats.indexedAt !== snapshot.stats.indexedAt;
   const previousSymbolId = state.currentSymbol?.id;
   if (indexChanged) { state.symbolInsights.clear(); state.projectInsight = null; }
@@ -1802,7 +1939,7 @@ async function openProject(root?: string): Promise<void> {
   applyPaneWidths(ui.leftWidth, ui.rightWidth); activateTab(ui.activeTab, false);
   const first = ui.lastFile && snapshot.files.some((file) => file.path === ui.lastFile) ? ui.lastFile : snapshot.files.find((file) => file.kind === 'c')?.path ?? snapshot.files[0]?.path;
   if (first) await openFile(first);
-  await Promise.all([refreshGraph(), refreshChats(ui.lastChatId), refreshNotes(), refreshQuizzes(), refreshReference()]);
+  await Promise.all([refreshGraph(), refreshChats(ui.lastChatId), refreshNotes(), refreshQuizzes(), refreshReference(), refreshBuildContext()]);
   const current = await window.codeTutor.getSettings(); state.settings = current; renderProjectWorkspace(current); setStatus(`인덱싱 완료 · 구문 오류 표시 ${snapshot.stats.parseErrors}건`);
   await resolveAnalysisPolicy(ui, current);
 }
@@ -2040,6 +2177,7 @@ function wireUi(): void {
   $<HTMLInputElement>('comment-ai-fast').addEventListener('change', () => void persistCommentAISettings());
   $('comment-create').addEventListener('click', () => void createComments());
   $('comment-apply').addEventListener('click', () => void applyComments());
+  $<HTMLSelectElement>('build-context-select').addEventListener('change', (event) => void selectBuildContext((event.target as HTMLSelectElement).value));
   $('context-ask-selection').addEventListener('click', () => { hideEditorContextMenu(); void askWithCurrentSelection(); });
   $('context-explain-selection').addEventListener('click', () => { hideEditorContextMenu(); void startExplanation('selection'); });
   $('context-comment-selection').addEventListener('click', () => { hideEditorContextMenu(); void openCommentDialog('selection'); });
@@ -2131,7 +2269,7 @@ async function bootstrap(): Promise<void> {
       ? ui.lastFile
       : snapshot.files.find((file) => file.kind === 'c')?.path ?? snapshot.files[0]?.path;
     if (first) await openFile(first);
-    await Promise.all([refreshGraph(), refreshChats(ui.lastChatId), refreshNotes(), refreshQuizzes(), refreshReference()]);
+    await Promise.all([refreshGraph(), refreshChats(ui.lastChatId), refreshNotes(), refreshQuizzes(), refreshReference(), refreshBuildContext()]);
     await refreshProjectInsight();
     await resolveAnalysisPolicy(ui, settings);
   }

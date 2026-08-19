@@ -124,12 +124,14 @@ npm run dist
 The current build is written to:
 
 ```text
-release-0.9.8/Auto-CodeTutor-0.9.8-portable.exe
+release-0.9.9/Auto-CodeTutor-0.9.9-portable.exe
 ```
 
 ## Honest Boundaries
 
 Auto CodeTutor performs source-level analysis rather than reproducing every compiler preprocessing and build decision. Function pointers, callbacks, complex macros, and conditional compilation can therefore produce incomplete or multiple possible paths. The app surfaces that uncertainty instead of presenting an educated guess as a verified fact.
+
+For Eclipse CDT/S32DS projects, an optional **Analysis → Build Settings Awareness (Experimental)** mode can read `.cproject` configurations and give the selected defines and include paths to AI analysis. It is hidden by default and remains a configuration hint—not a claim that Auto CodeTutor has reproduced the compiler exactly.
 
 ## Author
 

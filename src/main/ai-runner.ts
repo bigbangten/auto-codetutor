@@ -12,6 +12,7 @@ import type {
   EngineInfo,
   FieldInfo,
   ProjectInsight,
+  ProjectSnapshot,
   QuizQuestion,
   SourceRange,
   SymbolInsight,
@@ -126,6 +127,22 @@ function cleanSentence(value: unknown, fallback: string): string {
   return cleaned ? cleaned.slice(0, 700) : fallback;
 }
 
+function buildContextPrompt(snapshot: ProjectSnapshot): string {
+  const context = snapshot.buildContext;
+  if (!context?.enabled || !context.available) return '';
+  const active = context.configurations.find((configuration) => configuration.id === context.activeConfigurationId)
+    ?? context.configurations[0];
+  if (!active) return '';
+  return [
+    '[빌드 설정 문맥 · 실험적]',
+    `구성: ${active.name}`,
+    active.toolchain ? `도구 체인: ${active.toolchain}` : '',
+    `정의 심볼: ${active.defines.slice(0, 120).join(', ') || '없음'}`,
+    `인클루드 경로: ${active.includePaths.slice(0, 80).join(', ') || '없음'}`,
+    '이 정보는 .cproject에서 읽은 설정 힌트입니다. 전처리 결과를 직접 확인하지 않았다면 비활성 분기를 단정하지 마세요.',
+  ].filter(Boolean).join('\n');
+}
+
 export function parseProjectInsightOutput(output: string, sourceHash: string, model: string): ProjectInsight {
   const value = JSON.parse(jsonObjectText(output)) as Record<string, unknown>;
   const rawStages = Array.isArray(value.stages) ? value.stages : [];
@@ -135,7 +152,10 @@ export function parseProjectInsightOutput(output: string, sourceHash: string, mo
     const title = cleanSentence(record.title, '주요 동작');
     const summary = cleanSentence(record.summary, '프로젝트의 사용자 기능을 수행합니다.');
     const focus: ProjectInsight['stages'][number]['focus'] = record.focus === 'platform' || record.focus === 'mixed' ? record.focus : 'user';
-    return [{ title: title.slice(0, 60), summary, focus }];
+    const symbols = Array.isArray(record.symbols)
+      ? [...new Set(record.symbols.filter((name): name is string => typeof name === 'string').map((name) => name.trim()).filter(Boolean))].slice(0, 8)
+      : [];
+    return [{ title: title.slice(0, 60), summary, focus, symbols }];
   });
   const purpose = cleanSentence(value.purpose, '이 프로젝트의 사용자 기능을 수행합니다.');
   if (stages.length < 2) throw new Error('프로젝트 목적 단계가 충분하지 않습니다.');
@@ -233,6 +253,7 @@ async function buildCatalogPrompt(request: AIRequest, project: ProjectService): 
   if (!snapshot) throw new Error('프로젝트를 먼저 여세요.');
   if (request.catalogMode === 'project-profile') {
     const srcFiles = snapshot.files.filter((file) => /(?:^|\/)src\//i.test(file.path) && file.kind !== 'mex').map((file) => file.path);
+    const buildContext = buildContextPrompt(snapshot);
     return `당신은 임베디드 C 프로젝트를 처음 공부하는 사용자를 위한 코드 분석가입니다.
 이 작업은 읽기 전용입니다. 프로젝트 파일을 수정하지 마세요. rg, Get-Content/cat 같은 읽기 명령으로 실제 src 코드를 조사하세요.
 
@@ -241,13 +262,15 @@ async function buildCatalogPrompt(request: AIRequest, project: ProjectService): 
 함수 이름이나 초기화 세부 절차를 제목으로 나열하지 마세요. 예: "SQI 품질 측정", "케이블 상태 판정", "Ethernet 진단 메시지 전송"처럼 사용자가 이해할 수 있는 기능으로 쓰세요.
 src 폴더의 사용자 로직을 중심으로 보고 RTD/MEX/SDK 코드는 그 기능을 돕는 플랫폼 계층일 때만 언급하세요.
 확인되지 않은 목적을 추측으로 단정하지 마세요.
+각 단계의 symbols에는 실제 코드에서 확인한 대표 함수 이름 2~5개만 정확히 적으세요. 매크로·변수·추측한 이름은 넣지 마세요.
 
 [프로젝트]
 이름: ${snapshot.rootName}
 src 후보: ${srcFiles.slice(0, 300).join(', ')}
+${buildContext}
 
 오직 아래 형식의 JSON 객체만 반환하세요. 마크다운이나 설명 문장은 JSON 밖에 쓰지 마세요.
-{"purpose":"프로젝트의 실제 목적 한 문장","stages":[{"title":"사용자 기능 단계","summary":"이 단계가 목적 달성에 기여하는 방식","focus":"user"}]}
+{"purpose":"프로젝트의 실제 목적 한 문장","stages":[{"title":"사용자 기능 단계","summary":"이 단계가 목적 달성에 기여하는 방식","focus":"user","symbols":["실제함수명"]}]}
 focus는 src 사용자 로직이면 user, RTD/MEX/SDK 중심이면 platform, 둘을 연결하면 mixed입니다.`;
   }
 
@@ -314,6 +337,7 @@ async function buildPrompt(request: AIRequest, project: ProjectService, learning
   const symbol = request.symbolId ? project.getSymbol(request.symbolId) : null;
   const selection = request.selection;
   const snapshot = project.snapshot();
+  const buildContext = snapshot ? buildContextPrompt(snapshot) : '';
   const projectGraph = !symbol && !selection ? project.currentIndex?.graph({ limit: 80 }) : null;
   const entryNames = projectGraph?.nodes
     .filter((node) => node.kind === 'entry' || node.kind === 'irq')
@@ -350,6 +374,7 @@ async function buildPrompt(request: AIRequest, project: ProjectService, learning
     symbol ? `[선택 심볼]\n${symbolContext(symbol)}` : '',
     selection ? `[선택 코드 ${selection.file}:${selection.startLine}-${selection.endLine}]\n${clip(selection.text, request.kind === 'comment' ? 80_000 : 16_000)}` : '',
     !symbol && !selection ? projectContext : '',
+    buildContext,
     referenceContext,
   ].filter(Boolean).join('\n\n');
 
@@ -659,7 +684,8 @@ export class AIRunner {
     await this.learning.markSemanticBaseline(projectHash);
     const targets = this.project.semanticTargets();
     const cachedIds = await this.learning.getCachedSymbolIds(targets);
-    const cachedProject = await this.learning.getProjectInsight(projectHash);
+    const savedProject = await this.learning.getProjectInsight(projectHash);
+    const cachedProject = savedProject?.stages.some((stage) => stage.symbols?.length) ? savedProject : null;
     const ai = await this.catalogAI();
     this.backgroundProjectHash = projectHash;
     this.analysisStatus = {
@@ -784,7 +810,7 @@ export class AIRunner {
   async start(request: AIRequest): Promise<AIJob> {
     const root = this.project.root;
     if (!root) throw new Error('프로젝트를 먼저 여세요.');
-    if (request.kind === 'quiz' && !request.symbolId) throw new Error('이해도 체크를 만들 함수를 먼저 선택하세요.');
+    if (request.kind === 'quiz' && !request.symbolId) throw new Error('이해도 체크를 만들 심볼을 먼저 선택하세요.');
     if (request.kind === 'summary' && !request.symbolId) throw new Error('AI로 분석할 심볼을 먼저 선택하세요.');
     if (request.kind === 'comment' && !request.selection) throw new Error('주석을 생성할 코드 범위를 먼저 선택하세요.');
     if (request.kind === 'explain' && !request.symbolId && !request.selection && !this.project.snapshot()) throw new Error('프로젝트를 먼저 여세요.');

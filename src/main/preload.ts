@@ -44,6 +44,8 @@ const api: CodeTutorApi = {
   saveUiState: (state) => invoke('ui:save', state),
   getSettings: () => invoke('settings:get'),
   saveSettings: (settings) => invoke('settings:save', settings),
+  getBuildContext: () => invoke('build:context'),
+  selectBuildConfiguration: (configurationId) => invoke('build:select', configurationId),
   applyGeneratedComments: (request) => invoke('comments:apply', request),
   onJobEvent: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: AIJobEvent) => listener(payload);

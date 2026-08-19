@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { CommentApplyRequest, CommentApplyResult, ProjectFile, ProjectSnapshot, ReferenceFolderInfo, SymbolRecord } from '../shared/contracts.js';
+import type { BuildContextInfo, CommentApplyRequest, CommentApplyResult, ProjectFile, ProjectSnapshot, ReferenceFolderInfo, SymbolRecord } from '../shared/contracts.js';
 import { CParser, ProjectIndex, type ParsedFile } from './c-indexer.js';
 import { ensureProjectDataDir, normalizeRelative, resolveReadableFile } from './security.js';
 import { parseMexInventory } from './origin.js';
 import { readJson, writeJsonAtomic } from './json-store.js';
 import { ReferenceService, type ReferenceHit } from './reference-service.js';
+import { loadBuildContext } from './build-context.js';
 
 interface IndexCache {
   schema: 9;
@@ -96,6 +97,12 @@ export class ProjectService {
   private rerunRequested = false;
   private debounce: NodeJS.Timeout | null = null;
   private updateListener: ((snapshot: ProjectSnapshot) => void) | null = null;
+  private buildContext: BuildContextInfo = {
+    enabled: false,
+    available: false,
+    configurations: [],
+    note: '빌드 설정 인식이 꺼져 있습니다.',
+  };
   readonly references: ReferenceService;
 
   constructor(runtimeWasm: string, grammarWasm: string) {
@@ -111,13 +118,14 @@ export class ProjectService {
   get projectDataDir(): string | null { return this.dataDir; }
   get currentIndex(): ProjectIndex | null { return this.index; }
 
-  async open(requestedRoot: string): Promise<ProjectSnapshot> {
+  async open(requestedRoot: string, buildContextEnabled = false, preferredBuildConfiguration?: string): Promise<ProjectSnapshot> {
     await this.close();
     const resolved = await realpath(requestedRoot);
     const rootStat = await lstat(resolved);
     if (!rootStat.isDirectory()) throw new Error('프로젝트 폴더가 아닙니다.');
     this.rootPath = resolved;
     this.dataDir = await ensureProjectDataDir(resolved);
+    this.buildContext = await loadBuildContext(resolved, buildContextEnabled, preferredBuildConfiguration);
     await this.references.bind(this.dataDir);
     const snapshot = await this.reindex(false);
     this.startWatcher();
@@ -132,17 +140,31 @@ export class ProjectService {
     this.dataDir = null;
     this.index = null;
     this.files = [];
+    this.buildContext = { enabled: false, available: false, configurations: [], note: '빌드 설정 인식이 꺼져 있습니다.' };
     this.references.unbind();
   }
 
   async refresh(): Promise<ProjectSnapshot> {
     if (!this.rootPath || !this.dataDir) throw new Error('프로젝트를 먼저 여세요.');
     while (this.indexing) await new Promise<void>((resolve) => this.indexingWaiters.push(resolve));
+    this.buildContext = await loadBuildContext(this.rootPath, this.buildContext.enabled, this.buildContext.activeConfigurationId);
     return this.reindex(false);
   }
 
   snapshot(): ProjectSnapshot | null {
-    return this.index?.snapshot(this.files) ?? null;
+    const snapshot = this.index?.snapshot(this.files);
+    return snapshot ? { ...snapshot, buildContext: this.buildContext } : null;
+  }
+
+  buildContextInfo(): BuildContextInfo { return this.buildContext; }
+
+  async configureBuildContext(enabled: boolean, preferredBuildConfiguration?: string): Promise<BuildContextInfo> {
+    if (!this.rootPath) {
+      this.buildContext = { enabled, available: false, configurations: [], note: '열린 프로젝트가 없습니다.' };
+      return this.buildContext;
+    }
+    this.buildContext = await loadBuildContext(this.rootPath, enabled, preferredBuildConfiguration);
+    return this.buildContext;
   }
 
   async readSource(relativePath: string): Promise<string> {
@@ -259,8 +281,7 @@ export class ProjectService {
       this.files = files;
       this.index = new ProjectIndex(this.rootPath, parsedFiles);
       await writeJsonAtomic(cacheFile, { schema: 9, mexKey, parsedFiles } satisfies IndexCache);
-      const snapshot = this.index.snapshot(files);
-      return snapshot;
+      return this.snapshot()!;
     } finally {
       this.indexing = false;
       const waiters = this.indexingWaiters.splice(0);
