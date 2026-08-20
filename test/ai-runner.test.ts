@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildInvocation, extractJsonText, parseProjectInsightOutput, parseSymbolInsightOutput, parseWindowsShim } from '../src/main/ai-runner.js';
+import { buildInvocation, cliFailureMessage, extractJsonText, parseProjectInsightOutput, parseSymbolInsightOutput, parseWindowsShim } from '../src/main/ai-runner.js';
 import type { AIRequest, SymbolRecord } from '../src/shared/contracts.js';
 
 const base: AIRequest = { kind: 'explain', engine: 'codex', model: 'default', effort: 'high', fast: true, symbolId: 'symbol' };
@@ -11,8 +11,16 @@ test('Codex invocation is stdin-driven, ephemeral, and read-only', () => {
   assert.ok(invocation.args.includes('read-only'));
   assert.ok(invocation.args.includes('--ephemeral'));
   assert.ok(invocation.args.includes('--ignore-rules'));
+  assert.ok(invocation.args.includes('--ignore-user-config'));
   assert.equal(invocation.args.at(-1), '-');
   assert.ok(invocation.args.some((arg) => arg.includes('service_tier')));
+});
+
+test('unrelated MCP OAuth failures are not exposed as raw transport logs', () => {
+  const stderr = 'ERROR rmcp::transport::worker: AuthRequiredError { resource_metadata="https://mcp.notion.com", error="invalid_token", error_description="Missing or invalid access token" }';
+  const message = cliFailureMessage('codex', stderr, 1);
+  assert.match(message, /외부 MCP 서비스의 인증/);
+  assert.doesNotMatch(message, /rmcp::transport/);
 });
 
 test('Claude invocation disables customizations and exposes read tools only', () => {

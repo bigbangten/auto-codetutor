@@ -26,6 +26,7 @@ import type {
   SymbolInsight,
   SymbolRecord,
 } from '../shared/contracts.js';
+import { analysisProgressLabel, analysisProgressPercent } from '../shared/analysis-progress.js';
 import { renderFlowOverview, type FlowLocation } from './graph.js';
 import { renderGroundedMarkdown } from './markdown.js';
 import { describeCType } from '../shared/c-types.js';
@@ -1247,14 +1248,14 @@ function renderAnalysisStatus(): void {
   actions.append(model, restart); top.append(label, actions); host.append(top);
   if (status.state !== 'disabled' && status.state !== 'idle') {
     const progress = document.createElement('div'); progress.className = 'semantic-progress-track';
-    const fill = document.createElement('span'); fill.style.width = `${status.total ? Math.min(100, (status.completed + status.failed) / status.total * 100) : status.profileReady ? 100 : 4}%`; progress.append(fill); host.append(progress);
+    const fill = document.createElement('span'); fill.style.width = `${status.total ? analysisProgressPercent(status) : status.profileReady ? 100 : 4}%`; progress.append(fill); host.append(progress);
   }
   const detail = document.createElement('small');
   detail.textContent = status.state === 'disabled'
     ? status.message
     : status.state === 'idle'
       ? status.message
-    : `${status.completed.toLocaleString('ko-KR')}/${status.total.toLocaleString('ko-KR')} · ${status.message}`;
+    : `${analysisProgressLabel(status)} · ${status.message}`;
   host.append(detail);
 }
 

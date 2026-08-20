@@ -57,7 +57,10 @@ export function buildInvocation(request: AIRequest, root: string, executable: st
   if (request.engine === 'codex') {
     const args = [
       'exec', '--sandbox', 'read-only', '--ephemeral', '--ignore-rules', '--skip-git-repo-check',
-      '--json', '-C', root,
+      // Auto CodeTutor only needs Codex itself and its read-only shell tools. Loading the
+      // user's MCP servers here can make an unrelated expired OAuth token (for example,
+      // Notion) abort a quiz or explanation request before the model can answer.
+      '--ignore-user-config', '--json', '-C', root,
       '-c', `model_reasoning_effort="${request.effort}"`,
     ];
     if (request.fast) args.push('-c', 'service_tier="fast"');
@@ -72,6 +75,16 @@ export function buildInvocation(request: AIRequest, root: string, executable: st
   ];
   if (request.model && request.model !== 'default') args.push('--model', request.model);
   return { command: executable, args, cwd: root };
+}
+
+export function cliFailureMessage(engine: AIEngine, stderr: string, code: number | null): string {
+  const detail = stderr.trim();
+  const unrelatedMcpAuthFailure = /(?:rmcp::transport|mcp\.notion\.com)/i.test(detail)
+    && /(?:AuthRequired|invalid_token|Missing or invalid access token)/i.test(detail);
+  if (unrelatedMcpAuthFailure) {
+    return 'Codex에 연결된 외부 MCP 서비스의 인증이 만료되어 요청이 중단되었습니다. Auto CodeTutor는 외부 MCP를 불러오지 않도록 격리했으므로 앱을 다시 시작한 뒤 재시도해 주세요.';
+  }
+  return detail || `${engine} CLI가 코드 ${code ?? '알 수 없음'}로 종료되었습니다.`;
 }
 
 function clip(value: string, max: number): string {
@@ -979,7 +992,7 @@ export class AIRunner {
           }
           if (isCancelled()) resolve();
           else if (code === 0 && job.output.trim()) resolve();
-          else reject(new Error(stderr.trim() || `${request.engine} CLI가 코드 ${code ?? '알 수 없음'}로 종료되었습니다.`));
+          else reject(new Error(cliFailureMessage(request.engine, stderr, code)));
         });
         child.stdin.end(prompt, 'utf8');
       });
